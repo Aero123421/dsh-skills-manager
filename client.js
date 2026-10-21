@@ -21,9 +21,11 @@ window.__ModuleLoader__.load({
       }, h('path', { d: paths[name] }));
     }
     const en = {
+      localFolder:'Local folder',remoteMode:'npx skills',installMode:'Install source',remoteSource:'Command or GitHub repository',remoteHint:'Paste npx skills add owner/repo --skill name, owner/repo, or a GitHub URL. Initial support: public GitHub repositories and add only. No arbitrary shell execution. The current project/user destination stays fixed; a conflicting -g flag returns an error.',remoteTrust:'I trust this source and allow an external download and the pinned official skills 1.7.4 CLI to run in an isolated temporary directory. No skill scripts are executed.',fetching:'Fetching skills…',fetchSkills:'Preview skills',remoteResolvedSource:'Source',remoteCommit:'Commit',remoteSelect:'Select skills to install',remoteSelectHint:'Nothing is selected by default. Choose one or more skills.',remoteResults:'Installation results',remoteComplete:'All selected skills installed.',remoteIncomplete:'Some skills were not installed. Review each result below.',remoteInstalled:'Installed',remoteFailed:'Failed',remoteMissingResult:'The server did not return a result for this skill.',remoteExpired:'This preview has expired. Fetch a new preview.',
       panel:'SKILLS',title:'Skills',intro:'Reusable instructions for your agents.',project:'Project',user:'User',install:'Install skill',create:'Create skill',refresh:'Refresh',search:'Search skills…',projectPath:'Project directory',browse:'Browse',apply:'Open project',installed:'Installed skills',emptyTitle:'Your skills, in one place',empty:'Install a local skill or create reusable instructions for your agents.',noResults:'No matching skills',disabled:'Disabled',invalid:'Invalid',back:'All skills',preview:'Instructions',edit:'Edit',save:'Save changes',cancel:'Cancel',delete:'Delete skill',model:'Agent access',modelHint:'Allow agents to discover and load this skill.',human:'Slash command',humanHint:'Make this skill available through /name.',location:'Location',details:'Availability',body:'SKILL.md',newTitle:'Create skill',installTitle:'Install a local skill',source:'Source path',sourceHint:'Absolute path on the DSH host to a skill folder or Markdown file.',destination:'Install to',trust:'Only install skills you trust. Instructions and bundled scripts may influence agent actions.',installing:'Installing…',saving:'Saving…',loading:'Loading…',done:'Saved successfully.',installedDone:'Skill installed.',deleteTitle:'Delete this skill?',deleteHint:'The skill and its bundled files will be permanently removed. This cannot be undone.',draft:'Unsaved changes',discard:'Discard unsaved changes?',validation:'Check format',valid:'Skill format is valid.',pickerUnavailable:'Directory picker unavailable. Enter the host directory path.',selectProject:'Choose a project directory to manage its skills.',userHint:'Available across your projects.',renameError:'To use a different skill name, create a new skill.',close:'Close',bundle:'Bundle',markdown:'Markdown',draftRestored:'Unsaved draft restored.',draftConflict:'An older draft was restored. Saving may conflict with newer changes; cancel to use the current version.',
     };
     const ja = {
+      localFolder:'ローカルフォルダ',remoteMode:'npx skills',installMode:'インストール元',remoteSource:'コマンドまたはGitHubリポジトリ',remoteHint:'npx skills add owner/repo --skill name、owner/repo、またはGitHub URLを貼り付けてください。初期対応は公開GitHubリポジトリのaddのみです。任意のシェルコマンドは実行しません。現在のプロジェクト／ユーザーの保存先は固定され、競合する-g指定はエラーになります。',remoteTrust:'このソースを信頼し、外部ダウンロードと、隔離された一時ディレクトリでの公式CLI skills 1.7.4（固定バージョン）の実行を許可します。スキルのスクリプトは実行しません。',fetching:'スキルを取得中…',fetchSkills:'スキルをプレビュー',remoteResolvedSource:'ソース',remoteCommit:'コミット',remoteSelect:'インストールするスキルを選択',remoteSelectHint:'初期状態では未選択です。1つ以上のスキルを選んでください。',remoteResults:'インストール結果',remoteComplete:'選択したすべてのスキルをインストールしました。',remoteIncomplete:'インストールできなかったスキルがあります。各結果を確認してください。',remoteInstalled:'インストール済み',remoteFailed:'失敗',remoteMissingResult:'このスキルの結果がサーバーから返されませんでした。',remoteExpired:'プレビューの有効期限が切れました。再取得してください。',
       panel:'SKILLS',title:'Skills',intro:'エージェントに、繰り返し使える手順を。',project:'プロジェクト',user:'ユーザー',install:'スキルをインストール',create:'新規作成',refresh:'更新',search:'スキルを検索…',projectPath:'プロジェクトのディレクトリ',browse:'参照',apply:'開く',installed:'インストール済み',emptyTitle:'スキルをひとつの場所で管理',empty:'ローカルのスキルをインストールするか、エージェント用の手順を作成できます。',noResults:'一致するスキルがありません',disabled:'無効',invalid:'形式エラー',back:'すべてのスキル',preview:'手順',edit:'編集',save:'変更を保存',cancel:'キャンセル',delete:'スキルを削除',model:'エージェントからの利用',modelHint:'エージェントによるスキルの検出と読み込みを許可します。',human:'スラッシュコマンド',humanHint:'/name からこのスキルを呼び出せるようにします。',location:'保存場所',details:'利用設定',body:'SKILL.md',newTitle:'スキルを作成',installTitle:'ローカルのスキルをインストール',source:'インストール元のパス',sourceHint:'DSHホスト上のスキルフォルダ、またはMarkdownファイルの絶対パス。',destination:'インストール先',trust:'信頼できるスキルだけを追加してください。手順や同梱スクリプトはエージェントの動作に影響します。',installing:'インストール中…',saving:'保存中…',loading:'読み込み中…',done:'保存しました。',installedDone:'インストールしました。',deleteTitle:'このスキルを削除しますか？',deleteHint:'スキルと同梱ファイルを完全に削除します。この操作は取り消せません。',draft:'未保存の変更',discard:'未保存の変更を破棄しますか？',validation:'形式をチェック',valid:'スキルの形式は正常です。',pickerUnavailable:'ディレクトリ選択は利用できません。ホスト上のパスを入力してください。',selectProject:'スキルを管理するプロジェクトのディレクトリを指定してください。',userHint:'すべてのプロジェクトで利用できます。',renameError:'名前を変更する場合は、新しいスキルを作成してください。',close:'閉じる',bundle:'バンドル',markdown:'Markdown',draftRestored:'未保存の下書きを復元しました。',draftConflict:'以前の下書きを復元しました。保存時に新しい変更と競合する場合があります。現在の内容を使うにはキャンセルしてください。',
     };
     const CSS = `
@@ -37,6 +39,7 @@ window.__ModuleLoader__.load({
 .dsm-back{display:inline-flex;gap:6px;align-items:center;border:0;background:none;color:var(--dsw-alias-label-tertiary);padding:0;margin-bottom:24px}.dsm-detail-head{display:flex;align-items:center;gap:14px;margin-bottom:28px}.dsm-detail-head .dsm-actions{margin-left:auto}.dsm-block{margin-top:28px}.dsm-block h2{margin-bottom:12px}.dsm-switch-row{display:flex;gap:20px;align-items:center;justify-content:space-between;padding:12px 0}.dsm-switch-row+.dsm-switch-row{border-top:.5px solid var(--dsw-alias-border-l3)}.dsm-switch{border:0;padding:2px;width:32px;height:20px;flex:none;display:inline-flex;align-items:center;border-radius:20px;background:var(--dsw-alias-border-l1)}.dsm-switch[aria-checked=true]{background:var(--dsw-alias-button-primary-fill)}.dsm-switch:after{content:'';display:block;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-bg-layer-1)}.dsm-switch[aria-checked=true]:after{margin-left:12px}
 .dsm-pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:21px;padding:18px;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;background:var(--dsw-alias-bg-layer-2)}.dsm-editor{height:400px;min-height:240px;resize:vertical;line-height:22px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;padding:16px}.dsm-footer{display:flex;align-items:center;gap:8px;margin-top:16px}.dsm-danger{color:var(--dsw-alias-state-error-primary)}
 .dsm-dialog{padding:24px;border:1px solid var(--dsw-alias-border-l2);border-radius:16px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);width:min(520px,calc(100vw - 48px));height:fit-content;max-height:calc(100vh - 48px);overflow:auto}.dsm-dialog::backdrop{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 65%,transparent)}.dsm-dialog h2{font-size:18px;line-height:26px;font-weight:500;margin:0}.dsm-dialog-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.dsm-field{display:block;margin-top:20px}.dsm-field>span{display:block;margin-bottom:8px}.dsm-help{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;margin:8px 0 0}.dsm-destination{padding:10px 12px;background:var(--dsw-alias-bg-layer-2);border-radius:8px;overflow-wrap:anywhere;margin-top:8px}.dsm-dialog .dsm-footer{margin-top:24px;justify-content:flex-end}
+.dsm-dialog .dsm-tabs{margin-bottom:16px}.dsm-choices{border:1px solid var(--dsw-alias-border-l3);border-radius:8px;padding:12px;margin:20px 0 0;min-width:0}.dsm-choices legend{padding:0 4px}.dsm-choice{display:flex;align-items:flex-start;gap:8px;margin:12px 0;overflow-wrap:anywhere}.dsm-choice input{flex:none;margin-top:3px;accent-color:var(--dsw-alias-state-business-primary)}.dsm-choice .dsm-help{display:block;margin-top:2px}.dsm-remote-results{padding-left:20px;overflow-wrap:anywhere}.dsm-remote-results li{margin:8px 0}
 [data-platform=darwin] .dsm:not(.dsm-dialog){padding-top:calc(28px + var(--dsh-frame-top-clearance,0px))}@media(max-width:600px){.dsm{padding:24px 20px}.dsm-search{width:100%;order:2}.dsm-detail-head,.dsm-context{flex-wrap:wrap}.dsm-detail-head .dsm-actions{margin-left:0}.dsm-editor{height:340px}}
 `;
     function Button({ children, icon, primary, ...props }) {
@@ -45,7 +48,7 @@ window.__ModuleLoader__.load({
         className: `dsm-button${primary ? ' dsm-primary' : ''}${props.className ? ' ' + props.className : ''}`,
       }, icon && h(Icon, { name: icon, size: 16 }), children);
     }
-    function Modal({ title, close, children, t }) {
+    function Modal({ title, close, children, t, busy = false }) {
       const ref = useRef();
       useEffect(() => {
         const element = ref.current, previous = document.activeElement;
@@ -56,7 +59,7 @@ window.__ModuleLoader__.load({
         ref, className: 'dsm dsm-dialog', 'aria-label': title,
         onCancel: event => { event.preventDefault(); close(); },
       }, h('div', { className: 'dsm-dialog-head' }, h('h2', null, title),
-        h(Button, { icon: 'close', className: 'dsm-icon-button', onClick: close, 'aria-label': t('close') })), children);
+        h(Button, { icon: 'close', className: 'dsm-icon-button', onClick: close, disabled: busy, 'aria-label': t('close') })), children);
     }
     // Every asynchronous operation owns an immutable context and an abortable ticket.
     // Ref locks also cover multiple events in the same render, before React commits.
@@ -87,6 +90,10 @@ window.__ModuleLoader__.load({
       const [modal, setModal] = useState(null);
       const [source, setSource] = useState('');
       const [modalError, setModalError] = useState('');
+      const [remote, setRemote] = useState({ mode: 'local', open: false, input: '', trusted: false,
+        preview: null, selection: [], result: null, fetching: false });
+      const remoteView = useRef(remote);
+      remoteView.current = remote;
       const runtime = useRef({ mounted: true, epoch: 0, sequence: 0, requests: new Map(), busy: false });
       const view = useRef(null);
       const context = { scope, ...(scope === 'project' ? { projectRoot: project } : {}) };
@@ -157,6 +164,46 @@ window.__ModuleLoader__.load({
         if (!response.ok || !value?.ok) throw new Error(value?.error?.message || `HTTP ${response.status}`);
         return value.value;
       }
+      function updateRemote(patch) {
+        remoteView.current = { ...remoteView.current, ...patch };
+        setRemote(remoteView.current);
+      }
+      function clearRemote(patch = {}, render = true) {
+        const preview = remoteView.current.preview;
+        const next = { ...remoteView.current, preview: null, selection: [], result: null, ...patch };
+        remoteView.current = next;
+        if (render) setRemote(next);
+        if (preview) {
+          // Cleanup owns its original context and is deliberately independent of aborted UI tickets.
+          // No state updates or follow-up work: the server TTL is the fallback if cleanup fails.
+          api('discardRemote', preview.origin, { token: preview.token },
+            { controller: new AbortController() }).catch(() => {});
+        }
+      }
+      function openInstall() {
+        if (runtime.current.busy || !view.current.ready) return;
+        clearRemote({ mode: 'local', open: true, trusted: false, fetching: false });
+        setModalError('');
+        setModal('install');
+      }
+      function closeInstall() {
+        if (runtime.current.busy) return;
+        clearRemote({ open: false, trusted: false });
+        setModal(null);
+      }
+      function editRemote(patch) {
+        if (runtime.current.busy || !remoteView.current.open) return;
+        clearRemote(patch);
+        setModalError('');
+      }
+      function selectRemote(name, checked, preview) {
+        const current = remoteView.current;
+        if (runtime.current.busy || !current.open || current.preview !== preview) return;
+        if (!preview.skills.some(skill => skill.name === name)) return;
+        const selection = current.selection.filter(item => item !== name);
+        if (checked) selection.push(name);
+        updateRemote({ selection });
+      }
       function isAborted(error) { return error?.name === 'AbortError'; }
       function loaded(value) {
         if (!value.frontmatter) return value;
@@ -210,6 +257,7 @@ window.__ModuleLoader__.load({
         return () => {
           // The surrounding main slot may unmount without going through our Back button.
           saveDraft();
+          clearRemote({ open: false }, false);
           runtime.current.mounted = false;
           abortRequests();
           window.removeEventListener('beforeunload', beforeUnload);
@@ -228,6 +276,7 @@ window.__ModuleLoader__.load({
         if (!leave()) return;
         const next = { scope: nextScope, ...(nextScope === 'project' ? { projectRoot: nextProject } : {}) };
         if (JSON.stringify(next) === view.current.contextKey) return;
+        clearRemote({ open: false, trusted: false });
         abortRequests();
         view.current = { ...view.current, context: next, contextKey: JSON.stringify(next),
           detail: null, editor: false, dirty: false, ready: false };
@@ -348,13 +397,53 @@ window.__ModuleLoader__.load({
           await reload(item.context);
         });
       }
+      async function prepareRemote() {
+        const snapshot = remoteView.current;
+        if (!snapshot.open || snapshot.mode !== 'remote' || !snapshot.trusted || !snapshot.input.trim()) return;
+        const origin = { ...view.current.context };
+        await action('remote', origin, async (request, valid) => {
+          clearRemote({ fetching: true });
+          try {
+            const value = await api('prepareRemote', origin, { input: snapshot.input.trim() }, request);
+            if (!valid()) return;
+            updateRemote({ preview: { ...value, origin }, selection: [], result: null });
+          } finally {
+            if (valid()) updateRemote({ fetching: false });
+          }
+        }, null, true);
+      }
+      async function installRemote() {
+        if (runtime.current.busy) return;
+        const snapshot = remoteView.current, preview = snapshot.preview;
+        if (!snapshot.open || snapshot.mode !== 'remote' || !snapshot.trusted || !preview ||
+            !snapshot.selection.length || JSON.stringify(preview.origin) !== view.current.contextKey) return;
+        if (preview.expiresAt <= Date.now()) {
+          clearRemote();
+          setModalError(t('remoteExpired'));
+          return;
+        }
+        const origin = preview.origin, skillNames = [...snapshot.selection];
+        await action('mutation', origin, async (request, valid) => {
+          const value = await api('installRemote', origin, { token: preview.token, skillNames }, request);
+          if (!valid()) return;
+          const results = skillNames.map(name => (value.results || []).find(result => result.name === name) ||
+            { name, installed: false, error: { message: t('remoteMissingResult') } });
+          const result = { preview, results, errors: value.errors || [],
+            installed: value.installed === true && results.every(item => item.installed === true) };
+          clearRemote({ result });
+          // A partial result is not success. Keep the per-skill summary visible while refreshing reality.
+          await reload(origin);
+        }, null, true);
+      }
       async function install() {
+        if (!remoteView.current.open || remoteView.current.mode !== 'local') return;
         const origin = { ...view.current.context };
         const srcDir = source.trim();
         if (!srcDir) return;
         await action('mutation', origin, async (request, valid) => {
           await api('install', origin, { srcDir }, request);
           if (!valid()) return;
+          clearRemote({ open: false });
           setModal(null);
           setSource('');
           await reload(origin);
@@ -422,7 +511,7 @@ window.__ModuleLoader__.load({
           'aria-label': t('refresh'), disabled: loading || busy, onClick: () => reload() }),
         h(Button, { icon: 'plus', onClick: create, disabled: busy || !ready }, t('create')),
         h(Button, { icon: 'download', primary: true, disabled: busy || !ready,
-          onClick: () => { if (!runtime.current.busy && view.current.ready) { setModalError(''); setModal('install'); } } }, t('install')));
+          onClick: openInstall }, t('install')));
       const listView = h(R.Fragment, null,
         h('header', { className: 'dsm-head' },
           h('div', null, h('h1', null, t('title')), h('p', { className: 'dsm-sub' }, t('intro'))), controls),
@@ -458,7 +547,8 @@ window.__ModuleLoader__.load({
           h('h2', null, t('installed'), h('span', { className: 'dsm-count' }, skills.length)),
           h('div', { className: 'dsm-search' }, h(Icon, { name: 'search', size: 16 }),
             h('input', { type: 'search', className: 'dsm-input', value: query,
-              'aria-label': t('search'), placeholder: t('search'), onChange: event => setQuery(event.target.value) }))),
+              'aria-label': t('search'), placeholder: t('search'), disabled: busy,
+              onChange: event => { if (!runtime.current.busy) setQuery(event.target.value); } }))),
         loading ? h('p', { className: 'dsm-muted', role: 'status' }, t('loading')) :
           filtered.length ? h('ul', { className: 'dsm-list' }, filtered.map(skill => h('li', { key: skill.kind + ':' + (skill.storageName || skill.name) },
             h('button', { className: 'dsm-card', onClick: () => open(skill, context, listKey), disabled: busy || !ready,
@@ -505,21 +595,81 @@ window.__ModuleLoader__.load({
             disabled: busy || !ready, onClick: () => {
               if (!runtime.current.busy && view.current.ready) setModal('delete');
             } }, t('delete')))));
+      const remoteMetadata = remote.preview || remote.result?.preview;
+      const errorText = error => typeof error === 'string' ? error : error?.message || error?.error?.message || JSON.stringify(error);
       const installModal = modal === 'install' && h(Modal, {
-        title: t('installTitle'), close: () => { if (!runtime.current.busy) setModal(null); }, t,
-      }, h('form', { onSubmit: event => { event.preventDefault(); install(); } },
-        h('label', { className: 'dsm-field' }, h('span', null, t('source')),
+        title: t('install'), close: closeInstall, t, busy,
+      }, h('div', { role: 'tablist', className: 'dsm-tabs', 'aria-label': t('installMode') },
+        ['local', 'remote'].map(mode => h('button', {
+          type: 'button', role: 'tab', key: mode, id: 'dsm-install-tab-' + mode,
+          className: 'dsm-tab', 'aria-selected': remote.mode === mode,
+          'aria-controls': 'dsm-install-panel-' + mode, tabIndex: remote.mode === mode ? 0 : -1, disabled: busy,
+          onClick: () => { if (remoteView.current.mode !== mode) editRemote({ mode, trusted: false }); },
+          onKeyDown: event => {
+            if (runtime.current.busy || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const next = event.key === 'Home' ? 'local' : event.key === 'End' ? 'remote' : mode === 'local' ? 'remote' : 'local';
+            if (remoteView.current.mode !== next) editRemote({ mode: next, trusted: false });
+            event.currentTarget.parentElement.querySelectorAll('[role=tab]')[next === 'local' ? 0 : 1].focus();
+          },
+        }, t(mode === 'local' ? 'localFolder' : 'remoteMode')))),
+      h('form', { onSubmit: event => {
+        event.preventDefault();
+        if (remoteView.current.mode === 'local') install();
+        else if (remoteView.current.preview) installRemote();
+        else prepareRemote();
+      } },
+        h('div', { role: 'tabpanel', id: 'dsm-install-panel-' + remote.mode,
+          'aria-labelledby': 'dsm-install-tab-' + remote.mode },
+        remote.mode === 'local' ? h('label', { className: 'dsm-field' }, h('span', null, t('source')),
           h('input', { className: 'dsm-input', value: source, disabled: busy,
             onChange: event => { if (!runtime.current.busy) setSource(event.target.value); },
             placeholder: '/path/to/skill', autoFocus: true, required: true }),
-          h('p', { className: 'dsm-help' }, t('sourceHint'))),
+          h('p', { className: 'dsm-help' }, t('sourceHint'))) : h(R.Fragment, null,
+          h('label', { className: 'dsm-field' }, h('span', null, t('remoteSource')),
+            h('input', { className: 'dsm-input', value: remote.input, disabled: busy,
+              'aria-label': t('remoteSource'), 'aria-describedby': 'dsm-remote-hint', required: true,
+              placeholder: 'npx skills add vercel-labs/agent-skills --skill web-design-guidelines',
+              onChange: event => editRemote({ input: event.target.value, trusted: false }) }),
+            h('p', { id: 'dsm-remote-hint', className: 'dsm-help' }, t('remoteHint'))),
+          h('label', { className: 'dsm-choice' },
+            h('input', { type: 'checkbox', required: true, checked: remote.trusted, disabled: busy,
+              'aria-label': t('remoteTrust'), onChange: event => editRemote({ trusted: event.target.checked }) }),
+            h('span', { className: 'dsm-help' }, t('remoteTrust'))),
+          remote.fetching && h('p', { role: 'status' }, t('fetching')),
+          remoteMetadata && h('div', { className: 'dsm-field' }, h('span', null, t('remoteResolvedSource')),
+            h('code', { className: 'dsm-help', style: { overflowWrap: 'anywhere' } }, remoteMetadata.source),
+            remoteMetadata.commit && h('div', { className: 'dsm-help' }, t('remoteCommit') + ': ', h('code', null, remoteMetadata.commit))),
+          remote.preview && h('fieldset', { className: 'dsm-choices', disabled: busy },
+            h('legend', null, t('remoteSelect')), h('p', { className: 'dsm-help' }, t('remoteSelectHint')),
+            remote.preview.skills.map(skill => h('label', { className: 'dsm-choice', key: skill.name },
+              h('input', { type: 'checkbox', checked: remote.selection.includes(skill.name), disabled: busy,
+                'aria-label': skill.name, onChange: event => selectRemote(skill.name, event.target.checked, remote.preview) }),
+              h('span', null, skill.name, h('span', { className: 'dsm-help' }, skill.description))))),
+          remote.result && h('div', { role: remote.result.installed ? 'status' : 'alert', className: 'dsm-notice',
+            'data-error': !remote.result.installed }, h('h2', null, t('remoteResults')),
+            h('p', null, t(remote.result.installed ? 'remoteComplete' : 'remoteIncomplete')),
+            h('ul', { className: 'dsm-remote-results' }, remote.result.results.map(result => h('li', { key: result.name },
+              h('strong', null, result.name), ': ', t(result.installed ? 'remoteInstalled' : 'remoteFailed'),
+              !result.installed && result.error && ' — ' + errorText(result.error)))),
+            remote.result.errors.length > 0 && h('ul', null, remote.result.errors.map((error, index) =>
+              h('li', { key: index }, errorText(error))))))),
         h('div', { className: 'dsm-field' }, h('span', null, t('destination')),
-          h('div', { className: 'dsm-destination' }, h('div', null, t(scope)), h('code', { className: 'dsm-help' }, root))),
+          h('div', { className: 'dsm-destination' },
+            h('div', null, t(remote.mode === 'remote' && remoteMetadata ? remoteMetadata.scope : scope)),
+            h('code', { className: 'dsm-help' }, remote.mode === 'remote' && remoteMetadata ? remoteMetadata.root : root))),
         h('p', { className: 'dsm-help', style: { marginTop: 20 } }, t('trust')),
         modalError && h('p', { role: 'alert', className: 'dsm-notice', 'data-error': true }, modalError),
         h('div', { className: 'dsm-footer' },
-          h(Button, { onClick: () => { if (!runtime.current.busy) setModal(null); }, disabled: busy }, t('cancel')),
-          h('button', { className: 'dsm-button dsm-primary', type: 'submit', disabled: busy || !ready || !source.trim() }, t(busy ? 'installing' : 'install')))));
+          h(Button, { onClick: closeInstall, disabled: busy }, t('cancel')),
+          remote.mode === 'remote' && remote.preview && h(Button, {
+            onClick: prepareRemote, disabled: busy || !ready || !remote.trusted,
+          }, t('fetchSkills')),
+          h('button', { className: 'dsm-button dsm-primary', type: 'submit', disabled: busy || !ready ||
+            (remote.mode === 'local' ? !source.trim() : !remote.input.trim() || !remote.trusted ||
+              (!!remote.preview && !remote.selection.length)) },
+          t(remote.fetching ? 'fetching' : busy ? 'installing' :
+            remote.mode === 'remote' && !remote.preview ? 'fetchSkills' : 'install')))));
       const deleteModal = modal === 'delete' && h(Modal, {
         title: t('deleteTitle'), close: () => { if (!runtime.current.busy) setModal(null); }, t,
       }, h('p', { className: 'dsm-muted' }, t('deleteHint')), h('p', null, detail?.name),

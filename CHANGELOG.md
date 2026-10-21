@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 2026-10-22
+
+- Added a trust-gated **npx skills** install tab: paste restricted `npx skills add` syntax, preview candidates and immutable commit, explicitly select skills, and import into the fixed project/user target.
+- Supports public GitHub shorthand/repository/tree URLs, `--skill` filters and explicitly matching user/global scope. Unsupported CLI options and shell syntax fail closed; this is not a generic npx runner.
+- Added a bounded unauthenticated GitHub snapshot downloader. Symlinks, submodules, unsafe paths, redirects and oversized/truncated sources are rejected before the pinned CLI sees any source.
+- Runs official `skills@1.7.4` only against a validated local snapshot with a private temporary cwd/HOME and credential-stripped environment, no PATH tools, no shell, no Git/gh/SSH, telemetry off, and execution/output/resource limits.
+- Added context-bound ten-minute preview tokens, selection validation, limited active/retained previews, cleanup/cancellation and explicit per-skill partial conflict results. Existing atomic no-overwrite imports are reused.
+- Added `allowRemoteInstall` operator setting, default true. Existing user read-only rules still apply before network and again before import.
+- Added command/downloader/process/UI regression tests and an actual pinned-CLI offline fixture. Minimum Node.js is now 22.20.0, matching the CLI.
+
 ## 0.3.0 — 2026-10-22
 
 ### Data integrity

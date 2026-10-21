@@ -5,6 +5,7 @@ import { constants } from 'node:fs';
 import fs, { readdir, mkdir, rm, lstat, realpath } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { parseDocument, isMap, visit } from 'yaml';
+import { createRemoteInstaller } from './remote-installer.js';
 
 export const name = 'dsh-skills-manager';
 const NS = name;
@@ -17,11 +18,12 @@ function fail(message, status = 400) { return Object.assign(new Error(message), 
 function parseConfig(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('config must be an object');
   if (input.allowUserWrite !== undefined && typeof input.allowUserWrite !== 'boolean') throw fail('allowUserWrite must be a boolean');
+  if (input.allowRemoteInstall !== undefined && typeof input.allowRemoteInstall !== 'boolean') throw fail('allowRemoteInstall must be a boolean');
   const maxBodyBytes = input.maxBodyBytes ?? 262144;
   if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes <= 0 || maxBodyBytes > MAX_REQUEST_BYTES) {
     throw fail('maxBodyBytes must be a positive integer no greater than 4194304');
   }
-  return { allowUserWrite: input.allowUserWrite ?? true, maxBodyBytes };
+  return { allowUserWrite: input.allowUserWrite ?? true, allowRemoteInstall: input.allowRemoteInstall ?? true, maxBodyBytes };
 }
 
 // Cordis 4 validates the Standard Schema contract before calling apply().
@@ -470,6 +472,20 @@ export function apply(ctx, input = {}) {
     },
   };
 
+  const remote = createRemoteInstaller({
+    resolveTarget: async payload => {
+      if (!config.allowRemoteInstall) throw fail('remote skill installation is disabled', 403);
+      return rootFor(payload, true);
+    },
+    validateBody: validated,
+    importSkill: payload => handlers.install(payload),
+  });
+  handlers.prepareRemote = (payload, signal) => remote.prepare(payload, signal);
+  handlers.installRemote = (payload, signal) => remote.install(payload, signal);
+  handlers.discardRemote = payload => remote.discard(payload);
+  // Actual Cordis contexts own cleanup; the pure host fixtures may omit effect.
+  ctx.effect?.(() => () => remote.dispose(), 'dsh-skills-manager:remote-lifetime');
+
   async function readJson(request) {
     const length = Number(request.headers.get('content-length') || 0);
     if (length > MAX_REQUEST_BYTES) throw fail('request body too large', 413);
@@ -498,7 +514,7 @@ export function apply(ctx, input = {}) {
       connection.fetch.register({
         path: `/api/${NS}/${method}`, methods: ['POST'], requestBody: 'buffered',
         fetch: async (request) => {
-          try { return json({ ok: true, value: await operation(await readJson(request)) }); }
+          try { return json({ ok: true, value: await operation(await readJson(request), request.signal) }); }
           catch (error) { return json({ ok: false, error: { code: `${NS}/${method}`, message: error.message ?? String(error) } }, error.status ?? 500); }
         },
       });

@@ -35,7 +35,11 @@ async function fixture(t, config = {}) {
     } },
     workingDirectory: { async ensure() { return projectRoot; } },
   };
-  const ctx = { get: (key) => services[key], inject(_keys, callback) { callback(ctx); } };
+  const ctx = {
+    get: key => services[key],
+    inject(_keys, callback) { callback(ctx); },
+    effect(callback) { const dispose = callback(); if (dispose) t.after(dispose); },
+  };
   apply(ctx, config);
   async function call(method, payload = {}, init = {}) {
     const route = routes.get(`/api/dsh-skills-manager/${method}`);
@@ -77,9 +81,10 @@ async function assertNoStaging(root) {
 
 test('Config implements the Cordis Standard Schema contract and rejects unsafe limits', () => {
   assert.equal(Config['~standard'].version, 1);
-  assert.deepEqual(Config['~standard'].validate(undefined).value, { allowUserWrite: true, maxBodyBytes: 262144 });
+  assert.deepEqual(Config['~standard'].validate(undefined).value, { allowUserWrite: true, allowRemoteInstall: true, maxBodyBytes: 262144 });
   for (const maxBodyBytes of [0, -1, Infinity, 1.5, 4194305]) assert.ok(Config['~standard'].validate({ maxBodyBytes }).issues);
   assert.ok(Config['~standard'].validate({ allowUserWrite: 'true' }).issues);
+  assert.ok(Config['~standard'].validate({ allowRemoteInstall: 'true' }).issues);
   assert.ok(Config['~standard'].validate(null).issues);
 });
 
@@ -463,4 +468,16 @@ test('read-only tools retain installed contracts, cwd fallback, and exact-kind r
   assert.deepEqual(f.tools.get('skills_manager_read').parameters.properties.kind.enum, ['dir', 'flat']);
   const current = await f.tools.get('skills_manager_read').execute({ name: 'demo', kind: 'flat' }, exec);
   assert.equal(current.body, skill()); assert.equal(typeof current.revision, 'string');
+});
+
+test('remote routes respect operator disable and user write gates before retrieval', async t => {
+  const disabled = await fixture(t, { allowRemoteInstall: false });
+  for (const method of ['prepareRemote', 'installRemote', 'discardRemote']) {
+    assert.ok(disabled.routes.has(`/api/dsh-skills-manager/${method}`));
+  }
+  assert.equal((await disabled.call('prepareRemote', { input: 'npx skills add owner/repo' })).status, 403);
+  // Local operations remain usable when remote retrieval is disabled.
+  await create(disabled);
+  const readOnly = await fixture(t, { allowUserWrite: false });
+  assert.equal((await readOnly.call('prepareRemote', { scope: 'user', input: 'npx skills add owner/repo' })).status, 403);
 });
