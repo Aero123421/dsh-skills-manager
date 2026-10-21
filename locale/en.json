@@ -1,1 +1,6 @@
-{"dsh-skills-manager.nav.skills": "SKILLS"}
+{
+  "meta": {
+    "title": "Skills Manager",
+    "description": "Install, create and manage reusable agent skills for your projects and user account."
+  }
+}

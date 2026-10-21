@@ -1,222 +1,94 @@
 window.__ModuleLoader__.load({
   id: 'dsh-skills-manager',
   factory(require) {
-    const React = require('react');
-    const h = React.createElement;
-    const { useState, useEffect, useCallback } = React;
-
-    const NS = 'dsh-skills-manager';
-    const PANEL_ID = 'dsh-skills-manager';
-
-    async function call(method, payload, signal) {
-      const res = await fetch(`/api/${NS}/${method}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify(payload ?? {}),
-        signal,
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data || data.ok !== true) {
-        throw new Error(data?.error?.message || `request failed (${res.status})`);
-      }
-      return data.value;
-    }
-
-    function Icon() {
-      return h('svg', { viewBox: '0 0 64 64', width: 20, height: 20, 'aria-hidden': true },
-        h('rect', { x: 10, y: 8, width: 44, height: 48, rx: 8, fill: '#7c5cff' }),
-        h('path', { d: 'M20 24h24M20 32h24M20 40h14', stroke: '#fff', strokeWidth: 4, strokeLinecap: 'round' }));
-    }
-
-    const TEMPLATE = (name) => `---\nname: ${name}\ndescription: Describe what this skill does and when to use it.\n---\n\n# ${name}\n\nWrite instructions here.\n`;
-
-    function Panel(props) {
-      const controller = props.controller;
-      const [scope, setScope] = useState('project');
-      const [projectRoot, setProjectRoot] = useState(() => { try { return localStorage.getItem('dsh-skills-manager:projectRoot') || ''; } catch { return ''; } });
-      const [skills, setSkills] = useState([]);
-      const [root, setRoot] = useState('');
-      const [q, setQ] = useState('');
-      const [sel, setSel] = useState(null);
-      const [body, setBody] = useState('');
-      const [kind, setKind] = useState('dir');
-      const [status, setStatus] = useState('');
-      const [busy, setBusy] = useState(false);
-      const [srcDir, setSrcDir] = useState('');
-
-      useEffect(() => { try { localStorage.setItem('dsh-skills-manager:projectRoot', projectRoot); } catch {} }, [projectRoot]);
-
-      const refresh = useCallback(async () => {
-        setBusy(true); setStatus('');
-        try {
-          const v = await call('list', { scope, projectRoot: scope === 'project' ? projectRoot : undefined });
-          setSkills(v.skills || []); setRoot(v.root || '');
-          setStatus(`${(v.skills || []).length} skills @ ${v.root || ''}`);
-        } catch (e) { setStatus(`error: ${e.message}`); setSkills([]); }
-        finally { setBusy(false); }
-      }, [scope, projectRoot]);
-
-      useEffect(() => { refresh(); }, [refresh]);
-
-      const open = async (s) => {
-        setBusy(true); setStatus('');
-        try {
-          const v = await call('get', { scope, name: s.name, projectRoot: scope === 'project' ? projectRoot : undefined });
-          setSel(s.name); setBody(v.body || ''); setKind(v.kind || 'dir');
-          if (v.parseError) setStatus(`parse warning: ${v.parseError}`);
-          else setStatus(`opened ${s.name}`);
-        } catch (e) { setStatus(`error: ${e.message}`); }
-        finally { setBusy(false); }
-      };
-
-      const createNew = () => {
-        const name = (q || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'my-skill';
-        setSel(null); setBody(TEMPLATE(name)); setKind('dir'); setStatus(`editing new skill: ${name}`);
-      };
-
-      const save = async () => {
-        const m = /^name:\s*(.+)$/m.exec(body);
-        const frontName = (m ? m[1].trim().replace(/^["']|["']$/g, '') : '').split(/\s/)[0];
-        if (!frontName) { setStatus('error: frontmatter name not found'); return; }
-        setBusy(true);
-        try {
-          const v = await call('validate', { body });
-          if (!v.valid) { setStatus(`invalid: ${v.error}`); setBusy(false); return; }
-          await call('save', { scope, name: frontName, body, kind, projectRoot: scope === 'project' ? projectRoot : undefined });
-          setStatus(`saved ${frontName}`); setSel(frontName); setQ('');
-          await refresh();
-        } catch (e) { setStatus(`error: ${e.message}`); }
-        finally { setBusy(false); }
-      };
-
-      const remove = async () => {
-        if (!sel || !confirm(`Delete skill "${sel}"?`)) return;
-        setBusy(true);
-        try {
-          await call('remove', { scope, name: sel, projectRoot: scope === 'project' ? projectRoot : undefined });
-          setStatus(`deleted ${sel}`); setSel(null); setBody('');
-          await refresh();
-        } catch (e) { setStatus(`error: ${e.message}`); }
-        finally { setBusy(false); }
-      };
-
-      const toggle = async (field) => {
-        if (!sel) return;
-        setBusy(true);
-        try {
-          const cur = skills.find((s) => s.name === sel);
-          const patch = field === 'model'
-            ? { modelInvocable: !(cur ? cur.modelInvocable !== false : true) }
-            : { userInvocable: !(cur ? cur.userInvocable !== false : true) };
-          await call('setInvocation', { scope, name: sel, projectRoot: scope === 'project' ? projectRoot : undefined, ...patch });
-          setStatus(`updated ${sel}`); await refresh();
-          await open({ name: sel });
-        } catch (e) { setStatus(`error: ${e.message}`); }
-        finally { setBusy(false); }
-      };
-
-      const install = async () => {
-        if (!srcDir.trim()) { setStatus('error: srcDir is empty (skill bundle dir or .md file)'); return; }
-        setBusy(true);
-        try {
-          const v = await call('install', { scope, srcDir: srcDir.trim(), projectRoot: scope === 'project' ? projectRoot : undefined });
-          setStatus(`installed ${v.name} (${v.kind})`); setSrcDir(''); await refresh();
-        } catch (e) { setStatus(`error: ${e.message}`); }
-        finally { setBusy(false); }
-      };
-
-      const pickDir = async () => {
-        try {
-          const uiWs = controller?.uiWorkspace?.();
-          if (uiWs && typeof uiWs.pickDirectory === 'function') {
-            const p = await uiWs.pickDirectory();
-            if (p) { setProjectRoot(p); return; }
-          }
-          setStatus('picker unavailable: type the project path manually');
-        } catch (e) { setStatus(`picker error: ${e.message}`); }
-      };
-
-      const filtered = skills.filter((s) => !q || s.name.includes(q.toLowerCase()));
-      const cur = skills.find((s) => s.name === sel);
-
-      const row = (label, content) => h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0', flexWrap: 'wrap' } },
-        h('span', { style: { minWidth: 110, opacity: 0.7, fontSize: 12 } }, label), content);
-
-      return h('div', { style: { padding: 16, maxWidth: 1100, fontSize: 13 } },
-        h('h2', { style: { margin: '0 0 4px' } }, 'SKILLS manager'),
-        h('div', { style: { opacity: 0.7, marginBottom: 12 } }, 'Project (.dsh/skills) + user (~/.dsh/skills) roots. One level only: <name>/SKILL.md or <name>.md.'),
-        h('div', { style: { display: 'flex', gap: 8, marginBottom: 8 } },
-          ['project', 'user'].map((s) => h('button', {
-            key: s, onClick: () => setScope(s), disabled: busy,
-            style: { fontWeight: scope === s ? 'bold' : 'normal', padding: '4px 12px' },
-          }, s === 'project' ? 'Project' : 'User'))),
-        scope === 'project' ? row('projectRoot',
-          h('span', { style: { display: 'flex', gap: 6, flex: 1 } },
-            h('input', { value: projectRoot, onChange: (e) => setProjectRoot(e.target.value), placeholder: '/path/to/project', style: { flex: 1, padding: 4 } }),
-            h('button', { onClick: pickDir }, 'Browse'))) : null,
-        row('root', h('code', null, root || '(unknown)')),
-        row('actions',
-          h('span', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
-            h('button', { onClick: refresh, disabled: busy }, 'Reload'),
-            h('button', { onClick: createNew }, 'New'),
-            h('input', { value: srcDir, onChange: (e) => setSrcDir(e.target.value), placeholder: 'srcDir to install', style: { width: 220, padding: 4 } }),
-            h('button', { onClick: install, disabled: busy }, 'Install'))),
-        row('search', h('input', { value: q, onChange: (e) => setQ(e.target.value), placeholder: 'filter / new name', style: { flex: 1, padding: 4 } })),
-        h('div', { style: { display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' } },
-          h('div', { style: { flex: '1 1 280px', minWidth: 240 } },
-            h('div', { style: { fontWeight: 'bold', margin: '8px 0 4px' } }, `Skills (${filtered.length})`),
-            h('ul', { style: { listStyle: 'none', padding: 0, margin: 0, border: '1px solid #4443', borderRadius: 6 } },
-              filtered.map((s) => h('li', { key: s.name },
-                h('button', {
-                  onClick: () => open(s),
-                  style: { display: 'flex', width: '100%', textAlign: 'left', gap: 8, padding: '6px 8px', background: sel === s.name ? '#7c5cff22' : 'transparent', border: 0, cursor: 'pointer' },
-                },
-                  h('span', { style: { flex: 1 } },
-                    h('div', { style: { fontWeight: sel === s.name ? 'bold' : 'normal' } }, (s.valid === false ? '⚠ ' : '') + s.name),
-                    h('div', { style: { opacity: 0.65, fontSize: 12 } }, s.valid === false ? (s.error || 'invalid') : (s.description || ''))),
-                  h('span', { title: 'model invocable', style: { fontSize: 12, opacity: 0.8 } }, s.modelInvocable === false ? '🚫🤖' : '🤖'),
-                  h('span', { title: 'user invocable', style: { fontSize: 12, opacity: 0.8 } }, s.userInvocable === false ? '🚫👤' : '👤')))))),
-          h('div', { style: { flex: '2 1 420px', minWidth: 300 } },
-            h('div', { style: { fontWeight: 'bold', margin: '8px 0 4px' } }, sel ? `Edit: ${sel}` : 'Editor'),
-            cur ? h('div', { style: { display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' } },
-              h('button', { onClick: () => toggle('model'), disabled: busy }, `Model: ${cur.modelInvocable === false ? 'OFF' : 'ON'}`),
-              h('button', { onClick: () => toggle('user'), disabled: busy }, `User: ${cur.userInvocable === false ? 'OFF' : 'ON'}`),
-              h('span', { style: { opacity: 0.6, fontSize: 12 } }, cur.kind === 'flat' ? 'flat .md' : 'bundle dir')) : null,
-            h('textarea', {
-              value: body, onChange: (e) => setBody(e.target.value),
-              rows: 22, spellCheck: false,
-              placeholder: 'SKILL.md body with frontmatter…',
-              style: { width: '100%', fontFamily: 'monospace', fontSize: 12, padding: 8 },
-            }),
-            h('div', { style: { display: 'flex', gap: 6, marginTop: 6 } },
-              h('label', null, 'kind: ',
-                h('select', { value: kind, onChange: (e) => setKind(e.target.value) },
-                  h('option', { value: 'dir' }, 'bundle dir'), h('option', { value: 'flat' }, 'flat .md'))),
-              h('button', { onClick: save, disabled: busy || !body }, 'Save'),
-              h('button', { onClick: remove, disabled: busy || !sel }, 'Delete')))),
-        h('div', { style: { marginTop: 10, minHeight: 20, color: status.startsWith('error') ? '#e5484d' : '#30a46c' } }, status || (busy ? 'working…' : '')),
-      );
-    }
-
-    function createController(api) {
-      const listeners = new Set();
-      return {
-        uiWorkspace: () => { try { return api.get('uiWorkspace'); } catch { return undefined; } },
-        subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-      };
-    }
-
-    return {
-      inject: ['slots', 'connection'],
-      apply(ctx) {
-        const label = () => 'SKILLS';
-        const controller = createController({ get: (n) => { try { return ctx.get(n); } catch { return undefined; } } });
-        ctx.slots.inject('sidebar.panellist', () =>
-          ctx.slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 25, label }, Icon));
-        ctx.slots.inject('main', () =>
-          ctx.slots.register({ name: 'main', key: PANEL_ID, inject: () => ({ controller }) }, Panel));
-      },
+    const R = require('react'), h = R.createElement;
+    const { useState, useEffect, useRef } = R;
+    const ID = 'dsh-skills-manager', NS = 'skillsManager';
+    // Original artwork, inheriting the same color and size as native sidebar icons.
+    const paths = {
+      skill: 'M5 3.5h10l4 4V20H5z M15 3.5V8h4 M8.5 12h7 M8.5 15.5h5',
+      plus: 'M12 5v14 M5 12h14', search: 'M21 21l-5-5 M18 10.5a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0',
+      refresh: 'M20 7v5h-5 M4 17v-5h5 M5.4 7a8 8 0 0 1 13-2L20 7 M4 17l1.6 2a8 8 0 0 0 13-2',
+      back: 'M15 5l-7 7 7 7', close: 'M6 6l12 12 M18 6 6 18',
+      download: 'M12 3v12 M7 10l5 5 5-5 M4 16v5h16v-5', folder: 'M3 6h7l2 2h9v12H3z',
+      check: 'M5 12l4 4L19 6', trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 14h10l1-14 M10 10v7 M14 10v7',
+      arrow: 'M9 5l7 7-7 7', code: 'M8 7l-5 5 5 5 M16 7l5 5-5 5 M14 4l-4 16',
     };
+    function Icon({name='skill',size=20}) { return h('svg',{width:size,height:size,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.5,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},h('path',{d:paths[name]})); }
+    const en = {
+      panel:'SKILLS',title:'Skills',intro:'Reusable instructions for your agents.',project:'Project',user:'User',install:'Install skill',create:'Create skill',refresh:'Refresh',search:'Search skills…',projectPath:'Project directory',browse:'Browse',apply:'Open project',installed:'Installed skills',emptyTitle:'Your skills, in one place',empty:'Install a local skill or create reusable instructions for your agents.',noResults:'No matching skills',disabled:'Disabled',invalid:'Invalid',back:'All skills',preview:'Instructions',edit:'Edit',save:'Save changes',cancel:'Cancel',delete:'Delete skill',model:'Agent access',modelHint:'Allow agents to discover and load this skill.',human:'Slash command',humanHint:'Make this skill available through /name.',location:'Location',details:'Availability',body:'SKILL.md',newTitle:'Create skill',installTitle:'Install a local skill',source:'Source path',sourceHint:'Absolute path on the DSH host to a skill folder or Markdown file.',destination:'Install to',trust:'Only install skills you trust. Instructions and bundled scripts may influence agent actions.',installing:'Installing…',saving:'Saving…',loading:'Loading…',done:'Saved successfully.',installedDone:'Skill installed.',deleteTitle:'Delete this skill?',deleteHint:'The skill and its bundled files will be permanently removed. This cannot be undone.',draft:'Unsaved changes',discard:'Discard unsaved changes?',validation:'Check format',valid:'Skill format is valid.',pickerUnavailable:'Directory picker unavailable. Enter the host directory path.',selectProject:'Choose a project directory to manage its skills.',userHint:'Available across your projects.',renameError:'To use a different skill name, create a new skill.',close:'Close',
+    };
+    const ja = {
+      panel:'SKILLS',title:'Skills',intro:'エージェントに、繰り返し使える手順を。',project:'プロジェクト',user:'ユーザー',install:'スキルをインストール',create:'新規作成',refresh:'更新',search:'スキルを検索…',projectPath:'プロジェクトのディレクトリ',browse:'参照',apply:'開く',installed:'インストール済み',emptyTitle:'スキルをひとつの場所で管理',empty:'ローカルのスキルをインストールするか、エージェント用の手順を作成できます。',noResults:'一致するスキルがありません',disabled:'無効',invalid:'形式エラー',back:'すべてのスキル',preview:'手順',edit:'編集',save:'変更を保存',cancel:'キャンセル',delete:'スキルを削除',model:'エージェントからの利用',modelHint:'エージェントによるスキルの検出と読み込みを許可します。',human:'スラッシュコマンド',humanHint:'/name からこのスキルを呼び出せるようにします。',location:'保存場所',details:'利用設定',body:'SKILL.md',newTitle:'スキルを作成',installTitle:'ローカルのスキルをインストール',source:'インストール元のパス',sourceHint:'DSHホスト上のスキルフォルダ、またはMarkdownファイルの絶対パス。',destination:'インストール先',trust:'信頼できるスキルだけを追加してください。手順や同梱スクリプトはエージェントの動作に影響します。',installing:'インストール中…',saving:'保存中…',loading:'読み込み中…',done:'保存しました。',installedDone:'インストールしました。',deleteTitle:'このスキルを削除しますか？',deleteHint:'スキルと同梱ファイルを完全に削除します。この操作は取り消せません。',draft:'未保存の変更',discard:'未保存の変更を破棄しますか？',validation:'形式をチェック',valid:'スキルの形式は正常です。',pickerUnavailable:'ディレクトリ選択は利用できません。ホスト上のパスを入力してください。',selectProject:'スキルを管理するプロジェクトのディレクトリを指定してください。',userHint:'すべてのプロジェクトで利用できます。',renameError:'名前を変更する場合は、新しいスキルを作成してください。',close:'閉じる',
+    };
+    const CSS = `
+.dsm{box-sizing:border-box;height:100%;overflow:auto;color:var(--dsw-alias-label-primary);padding:28px clamp(24px,4vw,48px) 48px;font-size:13px;line-height:20px}.dsm *{box-sizing:border-box}.dsm button,.dsm input,.dsm textarea{font:inherit}.dsm button{cursor:pointer}.dsm button:disabled{cursor:default;opacity:.45}.dsm-inner{max-width:960px;margin:auto}
+.dsm-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:28px}.dsm h1{font-size:20px;line-height:28px;font-weight:500;margin:0}.dsm h2{font-size:14px;line-height:22px;font-weight:500;margin:0}.dsm-sub{color:var(--dsw-alias-label-secondary);margin:4px 0 0}.dsm-muted{color:var(--dsw-alias-label-tertiary)}
+.dsm-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.dsm-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary)}.dsm-button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.dsm-primary{background:var(--dsw-alias-button-primary-fill);border-color:transparent;color:var(--dsw-alias-label-primary-foreground)}.dsm-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}.dsm-icon-button{padding:0;width:32px;border:0;color:var(--dsw-alias-label-secondary)}
+.dsm button:focus-visible,.dsm input:focus-visible,.dsm textarea:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}.dsm-tabs{display:flex;gap:24px;border-bottom:1px solid var(--dsw-alias-border-l3);margin-bottom:24px}.dsm-tab{background:none;border:0;border-bottom:2px solid transparent;padding:0 0 12px;color:var(--dsw-alias-label-tertiary)}.dsm-tab[aria-selected=true]{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-label-primary)}
+.dsm-context{display:flex;gap:10px;align-items:center;margin-bottom:24px;min-width:0}.dsm-path{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);flex:1}.dsm-input{width:100%;height:36px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);min-width:0}.dsm-input::placeholder{color:var(--dsw-alias-label-caption)}.dsm-search{position:relative;margin-left:auto;width:260px;max-width:100%}.dsm-search svg{position:absolute;left:10px;top:10px;color:var(--dsw-alias-label-tertiary)}.dsm-search input{padding-left:34px;border-color:var(--dsw-alias-border-l3)}
+.dsm-section-head{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}.dsm-count{color:var(--dsw-alias-label-tertiary);font-weight:400;margin-left:8px}.dsm-list{list-style:none;padding:0;margin:0 -8px;display:flex;flex-direction:column;gap:2px}.dsm-card{display:flex;width:100%;align-items:center;gap:14px;border:0;border-radius:12px;background:transparent;text-align:left;color:inherit;padding:12px 8px}.dsm-card:hover{background:var(--dsw-alias-interactive-bg-hover)}.dsm-tile{flex:none;width:48px;height:48px;display:flex;align-items:center;justify-content:center;border:.5px solid var(--dsw-alias-border-l3);border-radius:10px;color:var(--dsw-alias-label-secondary)}.dsm-copy{flex:1;min-width:0}.dsm-name{font-size:14px;font-weight:500;line-height:20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.dsm-desc{display:block;color:var(--dsw-alias-label-tertiary);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dsm-tag{font-size:10px;font-weight:400;line-height:18px;padding:0 6px;border:1px solid var(--dsw-alias-border-l3);border-radius:5px;color:var(--dsw-alias-label-tertiary)}
+.dsm-empty{padding:64px 16px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px}.dsm-empty p{max-width:380px;margin:0;color:var(--dsw-alias-label-tertiary)}.dsm-notice{margin:16px 0;padding:10px 12px;background:var(--dsw-alias-bg-layer-2);border-radius:8px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;overflow-wrap:anywhere}.dsm-notice[data-error=true]{color:var(--dsw-alias-state-error-primary)}
+.dsm-back{display:inline-flex;gap:6px;align-items:center;border:0;background:none;color:var(--dsw-alias-label-tertiary);padding:0;margin-bottom:24px}.dsm-detail-head{display:flex;align-items:center;gap:14px;margin-bottom:28px}.dsm-detail-head .dsm-actions{margin-left:auto}.dsm-block{margin-top:28px}.dsm-block h2{margin-bottom:12px}.dsm-switch-row{display:flex;gap:20px;align-items:center;justify-content:space-between;padding:12px 0}.dsm-switch-row+.dsm-switch-row{border-top:.5px solid var(--dsw-alias-border-l3)}.dsm-switch{border:0;padding:2px;width:32px;height:20px;flex:none;display:inline-flex;align-items:center;border-radius:20px;background:var(--dsw-alias-border-l1)}.dsm-switch[aria-checked=true]{background:var(--dsw-alias-button-primary-fill)}.dsm-switch:after{content:'';display:block;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-bg-layer-1)}.dsm-switch[aria-checked=true]:after{margin-left:12px}
+.dsm-pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:21px;padding:18px;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;background:var(--dsw-alias-bg-layer-2)}.dsm-editor{height:400px;min-height:240px;resize:vertical;line-height:22px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;padding:16px}.dsm-footer{display:flex;align-items:center;gap:8px;margin-top:16px}.dsm-danger{color:var(--dsw-alias-state-error-primary)}
+.dsm-dialog{padding:24px;border:1px solid var(--dsw-alias-border-l2);border-radius:16px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);width:min(520px,calc(100vw - 48px));height:fit-content;max-height:calc(100vh - 48px);overflow:auto}.dsm-dialog::backdrop{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 65%,transparent)}.dsm-dialog h2{font-size:18px;line-height:26px;font-weight:500;margin:0}.dsm-dialog-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.dsm-field{display:block;margin-top:20px}.dsm-field>span{display:block;margin-bottom:8px}.dsm-help{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;margin:8px 0 0}.dsm-destination{padding:10px 12px;background:var(--dsw-alias-bg-layer-2);border-radius:8px;overflow-wrap:anywhere;margin-top:8px}.dsm-dialog .dsm-footer{margin-top:24px;justify-content:flex-end}
+[data-platform=darwin] .dsm:not(.dsm-dialog){padding-top:calc(28px + var(--dsh-frame-top-clearance,0px))}@media(max-width:600px){.dsm{padding:24px 20px}.dsm-search{width:100%;order:2}.dsm-detail-head,.dsm-context{flex-wrap:wrap}.dsm-detail-head .dsm-actions{margin-left:0}.dsm-editor{height:340px}}
+`;
+    function Button({children,icon,primary,...props}) { return h('button',{type:'button',...props,className:`dsm-button${primary?' dsm-primary':''}${props.className?' '+props.className:''}`},icon&&h(Icon,{name:icon,size:16}),children); }
+    function Modal({title,close,children,t}) {
+      const ref=useRef();
+      useEffect(()=>{const el=ref.current,previous=document.activeElement;el.showModal();return()=>{el.close();previous?.focus?.();};},[]);
+      return h('dialog',{ref,className:'dsm dsm-dialog',onCancel:e=>{e.preventDefault();close();}},h('div',{className:'dsm-dialog-head'},h('h2',null,title),h(Button,{icon:'close',className:'dsm-icon-button',onClick:close,'aria-label':t('close')})),children);
+    }
+    function Panel({ctx,t}) {
+      const [scope,Sscope]=useState('user'),[project,Sproject]=useState(()=>{try{return localStorage.getItem(ID+':projectRoot')||'';}catch{return '';}}),[projectDraft,SprojectDraft]=useState(project);
+      const [skills,Sskills]=useState([]),[root,Sroot]=useState(''),[query,Squery]=useState(''),[loading,Sloading]=useState(false),[busy,Sbusy]=useState(false),[notice,Snotice]=useState(null);
+      const [detail,Sdetail]=useState(null),[editor,Seditor]=useState(false),[text,Stext]=useState(''),[baseline,Sbaseline]=useState(''),[modal,Smodal]=useState(null),[source,Ssource]=useState(''),[modalError,SmodalError]=useState('');
+      const generation=useRef(0), dirty=editor&&text!==baseline;
+      const base={scope,projectRoot:scope==='project'?project:undefined};
+      async function api(method,payload={}){const res=await fetch(`/api/${ID}/${method}`,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({...base,...payload})});const v=await res.json().catch(()=>null);if(!res.ok||!v?.ok)throw new Error(v?.error?.message||`HTTP ${res.status}`);return v.value;}
+      async function reload(){const n=++generation.current;Sloading(true);try{if(scope==='project'&&!project){Sskills([]);Sroot('');return;}const v=await api('list');if(n===generation.current){Sskills(v.skills);Sroot(v.root);}}catch(e){if(n===generation.current)Snotice({error:true,text:e.message});}finally{if(n===generation.current)Sloading(false);}}
+      useEffect(()=>{Snotice(null);Sdetail(null);Seditor(false);reload();return()=>{generation.current++;};},[scope,project]);
+      function leave(){return !dirty||window.confirm(t('discard'));}
+      async function action(fn,success){Sbusy(true);Snotice(null);try{await fn();if(success)Snotice({text:success});}catch(e){Snotice({error:true,text:e.message});}finally{Sbusy(false);}}
+      async function open(s){if(!leave())return;await action(async()=>{const v=await api('get',{name:s.storageName||s.name});Sdetail({...s,...v,storageName:s.storageName||s.name});Stext(v.body);Sbaseline(v.body);Seditor(false);});}
+      function back(){if(leave()){Sdetail(null);Seditor(false);Snotice(null);}}
+      function create(){if(!leave())return;const value='---\nname: my-skill\ndescription: Describe what this skill does and when to use it.\n---\n\n# My skill\n\nWrite reusable instructions here.\n';Sdetail({name:'',kind:'dir'});Stext(value);Sbaseline(value);Seditor(true);Snotice(null);}
+      async function save(){await action(async()=>{const v=await api('validate',{body:text});if(!v.valid)throw new Error(v.error);const name=v.frontmatter.name;if(detail.name&&name!==detail.name)throw new Error(t('renameError'));await api('save',{name,body:text,kind:detail.kind||'dir'});Sdetail({...detail,name,body:text,description:v.frontmatter.description});Sbaseline(text);Seditor(false);await reload();},t('done'));}
+      async function toggle(key,value){await action(async()=>{await api('setInvocation',{name:detail.storageName||detail.name,[key]:value});const v=await api('get',{name:detail.storageName||detail.name});Sdetail({...detail,...v});Stext(v.body);Sbaseline(v.body);await reload();});}
+      async function install(){Sbusy(true);SmodalError('');try{await api('install',{srcDir:source});Smodal(null);Ssource('');await reload();Snotice({text:t('installedDone')});}catch(e){SmodalError(e.message);}finally{Sbusy(false);}}
+      async function remove(){await action(async()=>{await api('remove',{name:detail.storageName||detail.name});Smodal(null);Sdetail(null);Seditor(false);await reload();});}
+      function setProject(p){SprojectDraft(p);Sproject(p);try{localStorage.setItem(ID+':projectRoot',p);}catch{}}
+      const filtered=skills.filter(s=>(s.name+' '+(s.description||'')).toLowerCase().includes(query.toLowerCase()));
+      const current=detail&&skills.find(s=>(s.storageName||s.name)===(detail.storageName||detail.name));
+      const message=notice&&h('div',{role:notice.error?'alert':'status',className:'dsm-notice','data-error':!!notice.error},notice.text);
+      const switchRow=(label,hint,key,checked)=>h('div',{className:'dsm-switch-row'},h('div',null,h('div',null,label),h('div',{className:'dsm-help'},hint)),h('button',{type:'button',role:'switch','aria-label':label,'aria-checked':checked,className:'dsm-switch',disabled:busy||editor,onClick:()=>toggle(key,!checked)}));
+      const controls=h('div',{className:'dsm-actions'},h(Button,{icon:'refresh',className:'dsm-icon-button',title:t('refresh'),'aria-label':t('refresh'),disabled:loading||busy,onClick:reload}),h(Button,{icon:'plus',onClick:create,disabled:busy||(scope==='project'&&!project)},t('create')),h(Button,{icon:'download',primary:true,onClick:()=>{SmodalError('');Smodal('install');},disabled:busy||(scope==='project'&&!project)},t('install')));
+      return h('section',{className:'dsm','aria-label':t('title')},h('style',null,CSS),h('div',{className:'dsm-inner'},
+        !detail?h(R.Fragment,null,
+          h('header',{className:'dsm-head'},h('div',null,h('h1',null,t('title')),h('p',{className:'dsm-sub'},t('intro'))),controls),
+          h('div',{role:'tablist',className:'dsm-tabs','aria-label':t('destination')},['project','user'].map(s=>h('button',{key:s,role:'tab','aria-selected':scope===s,className:'dsm-tab',tabIndex:scope===s?0:-1,disabled:busy,onKeyDown:e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const next=e.key==='Home'?'project':e.key==='End'?'user':s==='project'?'user':'project';Sscope(next);e.currentTarget.parentElement.querySelectorAll('[role=tab]')[next==='project'?0:1].focus();}},onClick:()=>{if(leave())Sscope(s);}},t(s)))),
+          scope==='project'?h('form',{className:'dsm-context',onSubmit:e=>{e.preventDefault();if(leave())setProject(projectDraft.trim());}},h(Icon,{name:'folder',size:18}),h('input',{className:'dsm-input',value:projectDraft,onChange:e=>SprojectDraft(e.target.value),'aria-label':t('projectPath'),placeholder:t('projectPath')}),h(Button,{onClick:async()=>{try{const picker=ctx.get('uiWorkspace');const p=await picker?.pickDirectory?.();if(p)setProject(p);else if(!picker?.pickDirectory)Snotice({text:t('pickerUnavailable')});}catch(e){Snotice({error:true,text:e.message});}}},t('browse')),h('button',{className:'dsm-button',type:'submit'},t('apply'))):h('div',{className:'dsm-context'},h(Icon,{name:'folder',size:16}),h('code',{className:'dsm-path',title:root},root||t('userHint'))),message,
+          h('div',{className:'dsm-section-head'},h('h2',null,t('installed'),h('span',{className:'dsm-count'},skills.length)),h('div',{className:'dsm-search'},h(Icon,{name:'search',size:16}),h('input',{type:'search',className:'dsm-input',value:query,'aria-label':t('search'),placeholder:t('search'),onChange:e=>Squery(e.target.value)}))),
+          loading?h('p',{className:'dsm-muted',role:'status'},t('loading')):filtered.length?h('ul',{className:'dsm-list'},filtered.map(s=>h('li',{key:s.path||s.name},h('button',{className:'dsm-card',onClick:()=>open(s),disabled:busy},h('span',{className:'dsm-tile'},h(Icon,{size:24})),h('span',{className:'dsm-copy'},h('span',{className:'dsm-name'},s.name,(s.valid===false||s.modelInvocable===false&&s.userInvocable===false)&&h('span',{className:'dsm-tag'},t(s.valid===false?'invalid':'disabled'))),h('span',{className:'dsm-desc'},s.error||s.description)),h(Icon,{name:'arrow',size:16}))))):h('div',{className:'dsm-empty'},h('span',{className:'dsm-tile'},h(Icon,{size:28})),h('h2',null,t(query?'noResults':'emptyTitle')),h('p',null,t(scope==='project'&&!project?'selectProject':'empty')),!query&&h(Button,{icon:'plus',onClick:create,disabled:scope==='project'&&!project},t('create')))
+        ):h(R.Fragment,null,
+          h('button',{className:'dsm-back',onClick:back,disabled:busy},h(Icon,{name:'back',size:14}),t('back')),
+          h('div',{className:'dsm-detail-head'},h('span',{className:'dsm-tile'},h(Icon,{size:24})),h('div',null,h('h1',null,detail.name||t('newTitle')),h('p',{className:'dsm-sub'},detail.description||t(scope))),h('div',{className:'dsm-actions'},!editor&&h(Button,{icon:'code',onClick:()=>Seditor(true),disabled:busy},t('edit')),editor&&h(Button,{primary:true,icon:'check',onClick:save,disabled:busy},t(busy?'saving':'save')))),message,
+          h('div',{className:'dsm-block'},h('div',{className:'dsm-section-head'},h('h2',null,t(editor?'body':'preview')),dirty&&h('span',{className:'dsm-tag'},t('draft'))),editor?h('textarea',{className:'dsm-input dsm-editor',value:text,onChange:e=>Stext(e.target.value),spellCheck:false,'aria-label':t('body')}):h('pre',{className:'dsm-pre'},(detail.body||'').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/,''))),
+          editor?h('div',{className:'dsm-footer'},h(Button,{onClick:()=>action(async()=>{const v=await api('validate',{body:text});if(!v.valid)throw new Error(v.error);},t('valid')),disabled:busy},t('validation')),h(Button,{onClick:()=>{if(leave()){Stext(baseline);if(!detail.name){Sdetail(null);Seditor(false);}else Seditor(false);}},disabled:busy},t('cancel'))):h(R.Fragment,null,
+            h('div',{className:'dsm-block'},h('h2',null,t('details')),switchRow(t('model'),t('modelHint'),'modelInvocable',current?.modelInvocable!==false),switchRow(t('human'),t('humanHint'),'userInvocable',current?.userInvocable!==false)),
+            h('div',{className:'dsm-block'},h('h2',null,t('location')),h('code',{className:'dsm-muted',style:{overflowWrap:'anywhere'}},detail.path)),h('div',{className:'dsm-footer'},h(Button,{icon:'trash',className:'dsm-danger',onClick:()=>Smodal('delete'),disabled:busy},t('delete'))))
+        ),
+        modal==='install'&&h(Modal,{title:t('installTitle'),close:()=>{if(!busy)Smodal(null);},t},h('form',{onSubmit:e=>{e.preventDefault();install();}},h('label',{className:'dsm-field'},h('span',null,t('source')),h('input',{className:'dsm-input',value:source,onChange:e=>Ssource(e.target.value),placeholder:'/path/to/skill',autoFocus:true,required:true,disabled:busy}),h('p',{className:'dsm-help'},t('sourceHint'))),h('div',{className:'dsm-field'},h('span',null,t('destination')),h('div',{className:'dsm-destination'},h('div',null,t(scope)),h('code',{className:'dsm-help'},root))),h('p',{className:'dsm-help',style:{marginTop:20}},t('trust')),modalError&&h('p',{role:'alert',className:'dsm-notice','data-error':true},modalError),h('div',{className:'dsm-footer'},h(Button,{onClick:()=>Smodal(null),disabled:busy},t('cancel')),h('button',{className:'dsm-button dsm-primary',type:'submit',disabled:busy||!source.trim()},t(busy?'installing':'install'))))),
+        modal==='delete'&&h(Modal,{title:t('deleteTitle'),close:()=>{if(!busy)Smodal(null);},t},h('p',{className:'dsm-muted'},t('deleteHint')),h('p',null,detail?.name),h('div',{className:'dsm-footer'},h(Button,{onClick:()=>Smodal(null),disabled:busy},t('cancel')),h(Button,{className:'dsm-danger',icon:'trash',onClick:remove,disabled:busy},t('delete'))))
+      ));
+    }
+    return {inject:['slots','locale','connection'],apply(ctx){
+      ctx.effect(()=>ctx.locale.register(NS,{en,zh:en}),ID+':locale');
+      ctx.effect(()=>ctx.locale.register(NS,'ja',ja),ID+':ja');
+      const t=ctx.locale.bind(NS);
+      ctx.slots.inject('sidebar.panellist',()=>ctx.slots.register({name:'sidebar.panellist',id:ID,order:5,label:()=>t('panel'),locale:NS},({size})=>h(Icon,{size})));
+      ctx.slots.inject('main',()=>ctx.slots.register({name:'main',key:ID,locale:NS,inject:()=>({ctx})},Panel));
+    }};
   },
 });
