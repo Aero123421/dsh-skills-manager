@@ -1,15 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, stat, chmod } from 'node:fs/promises';
+import fs, { mkdtemp, mkdir, writeFile, readFile, rm, symlink, stat, chmod, realpath, readdir, truncate } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname, basename } from 'node:path';
 import { apply, Config } from '../index.js';
 
 const skill = (name = 'demo') => `---\nname: ${name}\ndescription: Test skill\n---\n\n# Instructions\nKeep exact bytes.  \n`;
 async function fixture(t, config = {}) {
-  const base = await mkdtemp(join(tmpdir(), 'dsh-skills-host-'));
+  // macOS /var is a symlink; fixtures must obey the same canonical-root policy.
+  const temporaryRoot = await realpath(tmpdir());
+  const base = await mkdtemp(join(temporaryRoot, 'dsh-skills-host-'));
   t.after(async () => {
-    assert.equal(resolve(base).startsWith(join(tmpdir(), 'dsh-skills-host-')), true);
+    assert.equal(resolve(base).startsWith(join(temporaryRoot, 'dsh-skills-host-')), true);
     await rm(base, { recursive: true, force: true });
   });
   const projectRoot = join(base, 'project');
@@ -23,7 +26,7 @@ async function fixture(t, config = {}) {
       return dispose;
     } } },
     tools: { register(tool) {
-      // Actual installed DSH rejects registrations without this contract.
+      // Installed DSH ToolDefinition requires canonical output plus renderer.
       assert.equal(tool.output.schema.type, 'object');
       assert.equal(typeof tool.output.render, 'function');
       assert.equal(tool.parameters.type, 'object');
@@ -47,6 +50,30 @@ async function fixture(t, config = {}) {
   }
   return { base, projectRoot, root: join(projectRoot, '.dsh', 'skills'), routes, tools, call, disposers };
 }
+async function create(f, { name = 'demo', kind = 'dir', body = skill(name) } = {}) {
+  const result = await f.call('save', { name, kind, body, mode: 'create' });
+  assert.equal(result.status, 200, JSON.stringify(result));
+  return result.value;
+}
+async function get(f, name = 'demo', kind = 'dir') {
+  const result = await f.call('get', { name, kind });
+  assert.equal(result.status, 200, JSON.stringify(result));
+  return result.value;
+}
+function identity(current) { return { name: current.name, kind: current.kind, expectedRevision: current.revision }; }
+async function linkOrSkip(t, source, dest, directory = false) {
+  try { await symlink(source, dest, directory ? (process.platform === 'win32' ? 'junction' : 'dir') : 'file'); return true; }
+  catch (error) { if (error.code === 'EPERM') { t.skip('symlink creation requires OS privileges'); return false; } throw error; }
+}
+function setHome(t, path) {
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = path;
+  t.after(() => { if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous; });
+}
+async function assertNoStaging(root) {
+  const names = await readdir(dirname(root));
+  assert.deepEqual(names.filter((name) => name.startsWith('.dsh-skills-')), []);
+}
 
 test('Config implements the Cordis Standard Schema contract and rejects unsafe limits', () => {
   assert.equal(Config['~standard'].version, 1);
@@ -56,88 +83,384 @@ test('Config implements the Cordis Standard Schema contract and rejects unsafe l
   assert.ok(Config['~standard'].validate(null).issues);
 });
 
-test('save/list/read validate names and expose storageName', async (t) => {
+test('save/list/read expose exact bodies, storage identity and stable content revisions', async (t) => {
   const f = await fixture(t);
-  assert.equal((await f.call('save', { name: 'demo', body: skill() })).status, 200);
+  const saved = await create(f);
   const listed = await f.call('list');
   assert.equal(listed.value.skills[0].storageName, 'demo');
   assert.equal(listed.value.skills[0].valid, true);
-  assert.equal((await f.call('get', { name: 'demo' })).value.body, skill());
-  assert.equal((await f.call('save', { name: '../escape', body: skill() })).status, 400);
+  assert.equal(listed.value.skills[0].kind, 'dir');
+  assert.equal(listed.value.skills[0].revision, saved.revision);
+  const current = await get(f);
+  assert.equal(current.body, skill());
+  assert.equal(current.revision, saved.revision);
+  assert.equal((await f.call('get', { name: 'demo' })).value.kind, 'dir');
+  assert.equal((await f.call('save', { mode: 'create', name: '../escape', body: skill() })).status, 400);
   assert.equal((await f.call('list', { scope: 'other' })).status, 400);
-  assert.equal((await f.call('list', { projectRoot: '/' })).status, 400);
+  assert.equal((await f.call('list', { projectRoot: resolve(f.projectRoot).split(/[\\/]/)[0] + '/' })).status, 400);
   assert.equal((await f.call('list', { projectRoot: 'relative' })).status, 400);
 });
 
-test('toggle preserves unknown YAML metadata, comments, multiline description, and instruction bytes', async (t) => {
+test('save is never an upsert; create conflicts across both formats and update requires CAS', async (t) => {
   const f = await fixture(t);
-  const original = '---\r\nname: demo\r\ndescription: >\r\n  Multiple lines\r\n  still work.\r\nmetadata:\r\n  author: Test\r\n  nested:\r\n    - x\r\nlicense: MIT\r\ndisable-model-invocation: false # keep comment\r\n---\r\n\r\nDo exactly this.  \r\n\r\n';
-  assert.equal((await f.call('save', { name: 'demo', body: original })).status, 200);
-  assert.equal((await f.call('setInvocation', { name: 'demo', modelInvocable: false, userInvocable: false })).status, 200);
-  const next = (await f.call('get', { name: 'demo' })).value.body;
-  assert.equal(next, original.replace('disable-model-invocation: false # keep comment', 'disable-model-invocation: true # keep comment').replace('---\r\n\r\nDo', 'user-invocable: false\r\n---\r\n\r\nDo'));
-  assert.equal((await f.call('setInvocation', { name: 'demo', modelInvocable: 'false' })).status, 400);
+  assert.equal((await f.call('save', { name: 'demo', body: skill() })).status, 400);
+  const original = await create(f, { kind: 'flat' });
+  for (const kind of ['flat', 'dir']) assert.equal((await f.call('save', { mode: 'create', kind, name: 'demo', body: skill() + 'other' })).status, 409);
+  for (const extra of [{}, { kind: 'flat' }, { expectedRevision: original.revision }, { kind: 'other', expectedRevision: original.revision }]) {
+    assert.equal((await f.call('save', { mode: 'update', name: 'demo', body: skill(), ...extra })).status, 400);
+  }
+  assert.equal((await f.call('save', { mode: 'update', ...identity(original), expectedRevision: 'stale', body: skill() })).status, 409);
+  assert.equal((await f.call('save', { mode: 'update', ...identity(original), name: 'missing', body: skill('missing') })).status, 409);
+  const body = skill() + '\nChanged ✓\n';
+  const updated = await f.call('save', { mode: 'update', ...identity(original), body });
+  assert.equal(updated.status, 200);
+  assert.notEqual(updated.value.revision, original.revision);
+  assert.equal((await get(f, 'demo', 'flat')).body, body);
+  assert.equal((await f.call('remove', identity(original))).status, 409);
+  assert.equal((await f.call('setInvocation', { ...identity(original), modelInvocable: false })).status, 409);
+  for (const method of ['remove', 'setInvocation']) {
+    assert.equal((await f.call(method, { name: 'demo', kind: 'flat' })).status, 400);
+    assert.equal((await f.call(method, { name: 'demo', expectedRevision: updated.value.revision })).status, 400);
+  }
+  await assert.rejects(stat(join(f.root, 'demo')), { code: 'ENOENT' });
 });
 
-test('bundle install copies references/scripts/assets and refuses overwrites', async (t) => {
+test('colliding directory and flat names are read, toggled and removed only by exact kind', async (t) => {
+  const f = await fixture(t);
+  const dirBody = skill() + 'directory instructions\n', flatBody = skill() + 'flat instructions\n';
+  await mkdir(join(f.root, 'demo'), { recursive: true });
+  await writeFile(join(f.root, 'demo', 'SKILL.md'), dirBody);
+  await writeFile(join(f.root, 'demo.md'), flatBody);
+  const dir = await get(f), flat = await get(f, 'demo', 'flat');
+  assert.equal(dir.body, dirBody); assert.equal(flat.body, flatBody);
+  assert.notEqual(dir.revision, flat.revision);
+  assert.deepEqual((await f.call('list')).value.skills.map(({ kind, revision }) => ({ kind, revision })), [{ kind: 'dir', revision: dir.revision }, { kind: 'flat', revision: flat.revision }]);
+  assert.equal((await f.call('get', { name: 'demo' })).status, 409);
+  for (const method of ['save', 'setInvocation', 'remove']) {
+    assert.equal((await f.call(method, { name: 'demo', mode: 'update', body: skill(), expectedRevision: dir.revision })).status, 409);
+  }
+  assert.equal((await f.call('save', { mode: 'update', ...identity(flat), expectedRevision: dir.revision, body: flatBody })).status, 409);
+  const toggled = await f.call('setInvocation', { ...identity(flat), modelInvocable: false });
+  assert.equal(toggled.status, 200);
+  assert.equal((await get(f)).body, dirBody);
+  assert.match((await get(f, 'demo', 'flat')).body, /disable-model-invocation: true/);
+  assert.equal((await f.call('remove', identity(dir))).status, 200);
+  assert.equal((await f.call('get', { name: 'demo', kind: 'dir' })).status, 404);
+  assert.equal((await get(f, 'demo', 'flat')).revision, toggled.value.revision);
+});
+
+test('atomic update leaves readers on original bytes until publish and concurrent CAS has one winner', { timeout: 15000 }, async (t) => {
+  const f = await fixture(t), alternate = await fixture(t);
+  const original = await create(f);
+  const originalOpen = fs.open;
+  let enter, release;
+  const entered = new Promise((done) => { enter = done; });
+  const resume = new Promise((done) => { release = done; });
+  t.after(() => release());
+  let intercepted = false;
+  t.mock.method(fs, 'open', async (path, flags, ...args) => {
+    const handle = await originalOpen(path, flags, ...args);
+    if (!intercepted && basename(path).startsWith('.dsh-skills-') && (flags & constants.O_WRONLY)) {
+      intercepted = true;
+      const write = handle.writeFile.bind(handle);
+      handle.writeFile = async (body) => {
+        const bytes = Buffer.from(body), middle = Math.floor(bytes.length / 2);
+        await write(bytes.subarray(0, middle)); enter();
+        await resume; await write(bytes.subarray(middle));
+      };
+    }
+    return handle;
+  });
+  const winner = skill() + 'A'.repeat(90000) + '\n';
+  const first = f.call('save', { mode: 'update', ...identity(original), body: winner });
+  await entered;
+  assert.equal((await get(f)).body, skill());
+  const pending = [
+    alternate.call('save', { projectRoot: f.projectRoot, mode: 'update', ...identity(original), body: skill() + 'B'.repeat(70000) }),
+    f.call('setInvocation', { ...identity(original), userInvocable: false }),
+    f.call('remove', identity(original)),
+  ];
+  release();
+  assert.equal((await first).status, 200);
+  assert.deepEqual((await Promise.all(pending)).map((result) => result.status), [409, 409, 409]);
+  assert.equal((await get(f)).body, winner);
+  assert.deepEqual((await readdir(join(f.root, 'demo'))), ['SKILL.md']);
+});
+
+test('failed partial temp write and failed rename never destroy the original', async (t) => {
+  const f = await fixture(t), original = await create(f);
+  const originalOpen = fs.open;
+  const mocked = t.mock.method(fs, 'open', async (path, flags, ...args) => {
+    const handle = await originalOpen(path, flags, ...args);
+    if (basename(path).startsWith('.dsh-skills-') && (flags & constants.O_WRONLY)) {
+      const write = handle.writeFile.bind(handle);
+      handle.writeFile = async (body) => { await write(Buffer.from(body).subarray(0, 23)); throw Object.assign(new Error('injected disk full'), { code: 'ENOSPC' }); };
+    }
+    return handle;
+  });
+  assert.equal((await f.call('save', { mode: 'update', ...identity(original), body: skill() + 'changed' })).status, 500);
+  assert.equal((await get(f)).body, skill());
+  assert.equal((await get(f)).revision, original.revision);
+  assert.deepEqual(await readdir(join(f.root, 'demo')), ['SKILL.md']);
+  mocked.mock.restore();
+  t.mock.method(fs, 'rename', async () => { throw Object.assign(new Error('injected rename failure'), { code: 'EIO' }); });
+  assert.equal((await f.call('save', { mode: 'update', ...identity(original), body: skill() + 'changed' })).status, 500);
+  assert.equal((await get(f)).body, skill());
+  assert.deepEqual(await readdir(join(f.root, 'demo')), ['SKILL.md']);
+});
+
+test('concurrent creates and installs cannot publish both formats of one name', async (t) => {
+  const f = await fixture(t), alternate = await fixture(t);
+  const src = join(f.base, 'source.md');
+  await writeFile(src, skill());
+  const results = await Promise.all([
+    f.call('save', { mode: 'create', name: 'demo', kind: 'dir', body: skill() }),
+    alternate.call('save', { projectRoot: f.projectRoot, mode: 'create', name: 'demo', kind: 'flat', body: skill() }),
+    f.call('install', { srcDir: src }),
+  ]);
+  assert.deepEqual(results.map((result) => result.status).sort(), [200, 409, 409]);
+  assert.equal((await f.call('list')).value.skills.length, 1);
+  await assertNoStaging(f.root);
+});
+
+test('toggle preserves quoted keys, unknown YAML, comments, CRLF, and exact instruction bytes', async (t) => {
+  const f = await fixture(t);
+  const original = '---\r\n"name": demo\r\n\'description\': >\r\n  Multiple lines\r\n  still work.\r\nmetadata:\r\n  author: Test\r\n  nested:\r\n    - x\r\nlicense: MIT\r\n"disable-model-invocation": false # keep comment\r\n---\r\n\r\nDo exactly this.  \r\n\r\n';
+  const saved = await create(f, { body: original });
+  const toggle = await f.call('setInvocation', { ...identity(saved), modelInvocable: false, userInvocable: false });
+  assert.equal(toggle.status, 200);
+  const next = await get(f);
+  assert.equal(next.body, original.replace('false # keep comment', 'true # keep comment').replace('---\r\n\r\nDo', 'user-invocable: false\r\n---\r\n\r\nDo'));
+  assert.equal(next.frontmatter['disable-model-invocation'], true);
+  assert.equal(next.frontmatter['user-invocable'], false);
+  assert.equal(next.frontmatter.description, 'Multiple lines still work.\n');
+  assert.equal((await f.call('setInvocation', { ...identity(next), modelInvocable: 'false' })).status, 400);
+  const again = await f.call('setInvocation', { ...identity(next), modelInvocable: true });
+  assert.equal(again.status, 200);
+  assert.equal((await get(f)).body.match(/disable-model-invocation/g).length, 1);
+});
+
+test('YAML parser validates quoted duplicates, nested syntax, mapping shape, and DSH legacy fields', async (t) => {
+  const f = await fixture(t);
+  const bodies = [
+    '---\nname: demo\n"name": demo\ndescription: valid\n---\nbody',
+    '---\nname: demo\ndescription: valid\nmetadata: [broken\n---\nbody',
+    '---\n- name: demo\n- description: valid\n---\nbody',
+    ...['null', '42', 'false', '[]', '{}', '""', '"  "'].map((value) => `---\nname: demo\ndescription: ${value}\n---\nbody`),
+    ...['disableModelInvocation', 'modelInvocable', 'userInvocable'].map((key) => skill().replace('description: Test skill', `description: Test skill\n"${key}": false`)),
+    ...['null', '[]', '{}', '2', 'perhaps'].map((value) => skill().replace('description: Test skill', `description: Test skill\n"user-invocable": ${value}`)),
+  ];
+  for (const body of bodies) {
+    const result = await f.call('validate', { body });
+    assert.equal(result.status, 200);
+    assert.equal(result.value.valid, false, body);
+    assert.equal((await f.call('save', { mode: 'create', name: 'demo', body })).status, 400);
+  }
+  for (const value of ['true', 'false', '"YES"', "'off'", 'on', 'no', '1', '0', '"0"']) {
+    assert.equal((await f.call('validate', { body: skill().replace('description: Test skill', `description: Test skill\n"user-invocable": ${value}`) })).value.valid, true, value);
+  }
+});
+
+test('AST toggle supports flow mappings, escaped quoted keys, aliases, and boolean strings without duplicate keys', async (t) => {
+  const f = await fixture(t);
+  const body = '---\n{ "name": demo, description: "Flow: value", "disable-model-\\u0069nvocation": "yes", metadata: { unknown: [1, 2] } } # root comment\n---\n\nExact body\n';
+  const saved = await create(f, { body });
+  const result = await f.call('setInvocation', { ...identity(saved), modelInvocable: true, userInvocable: false });
+  assert.equal(result.status, 200);
+  const next = await get(f);
+  assert.equal(next.body, body.replace('{ "name"', '{user-invocable: false,  "name"').replace(': "yes"', ': false'));
+  assert.equal(next.frontmatter['disable-model-invocation'], false);
+  assert.equal(next.frontmatter['user-invocable'], false);
+  assert.deepEqual(next.frontmatter.metadata, { unknown: [1, 2] });
+  const aliased = '---\nname: demo\ndescription: Test\nmetadata:\n  flag: &flag true\n"user-invocable": *flag # retain alias comment\n---\nBody\n';
+  const update = await f.call('save', { mode: 'update', ...identity(next), body: aliased });
+  assert.equal(update.status, 200);
+  assert.equal((await f.call('setInvocation', { ...identity(update.value), userInvocable: false })).status, 200);
+  assert.equal((await get(f)).body, aliased.replace('*flag #', 'false #'));
+});
+
+test('editing anchored invocation scalars preserves untargeted aliases and metadata values', async (t) => {
+  const f = await fixture(t);
+  const body = '---\nname: demo\ndescription: Test\ndisable-model-invocation: &flag false # anchor comment\nuser-invocable: *flag # other invocation\nmetadata:\n  flag: *flag # metadata alias\n---\nExact body\n';
+  const saved = await create(f, { body });
+  assert.equal((await f.call('setInvocation', { ...identity(saved), modelInvocable: false })).status, 200);
+  const next = await get(f);
+  assert.equal(next.frontmatter['disable-model-invocation'], true);
+  assert.equal(next.frontmatter['user-invocable'], false);
+  assert.equal(next.frontmatter.metadata.flag, false);
+  assert.equal(next.body, body.replace('&flag false', '&flag true').replaceAll('*flag', 'false'));
+  const stringBody = body.replace('&flag false', '&flag "no"');
+  const updated = await f.call('save', { mode: 'update', ...identity(next), body: stringBody });
+  assert.equal(updated.status, 200);
+  assert.equal((await f.call('setInvocation', { ...identity(updated.value), modelInvocable: false, userInvocable: true })).status, 200);
+  const final = await get(f);
+  assert.equal(final.frontmatter['disable-model-invocation'], true);
+  assert.equal(final.frontmatter['user-invocable'], true);
+  assert.equal(final.frontmatter.metadata.flag, 'no');
+  assert.match(final.body, /flag: "no" # metadata alias/);
+});
+
+test('invalid and empty existing skills retain revisions for repair or exact removal', async (t) => {
+  const f = await fixture(t);
+  await mkdir(f.root, { recursive: true });
+  await writeFile(join(f.root, 'demo.md'), '');
+  const current = await get(f, 'demo', 'flat');
+  assert.equal(current.body, '');
+  assert.ok(current.parseError);
+  assert.equal((await f.call('list')).value.skills[0].revision, current.revision);
+  assert.equal((await f.call('save', { mode: 'update', ...identity(current), body: skill() })).status, 200);
+  const repaired = await get(f, 'demo', 'flat');
+  assert.notEqual(repaired.revision, current.revision);
+  await writeFile(join(f.root, 'demo.md'), 'invalid external edit');
+  assert.equal((await f.call('remove', identity(repaired))).status, 409);
+  assert.equal((await f.call('remove', identity(await get(f, 'demo', 'flat')))).status, 200);
+});
+
+test('bundle install copies resources, executable bits and empty directories; refuses either-format overwrites', async (t) => {
   const f = await fixture(t);
   const source = join(f.base, 'source');
-  for (const dir of ['references', 'scripts', 'assets/nested']) await mkdir(join(source, dir), { recursive: true });
+  for (const dir of ['references', 'scripts', 'assets/nested', 'empty']) await mkdir(join(source, dir), { recursive: true });
   await writeFile(join(source, 'SKILL.md'), skill());
   await writeFile(join(source, 'references', 'guide.md'), 'reference');
   await writeFile(join(source, 'scripts', 'run.sh'), '#!/bin/sh\ntrue\n');
   await chmod(join(source, 'scripts', 'run.sh'), 0o755);
   await writeFile(join(source, 'assets', 'nested', 'data.bin'), Buffer.from([0, 255, 20]));
-  assert.equal((await f.call('install', { srcDir: source })).status, 200);
+  const installed = await f.call('install', { srcDir: source });
+  assert.equal(installed.status, 200);
+  assert.equal(installed.value.revision, (await get(f)).revision);
   assert.equal(await readFile(join(f.root, 'demo', 'references', 'guide.md'), 'utf8'), 'reference');
-  assert.equal((await stat(join(f.root, 'demo', 'scripts', 'run.sh'))).mode & 0o111, 0o111);
+  if (process.platform !== 'win32') assert.equal((await stat(join(f.root, 'demo', 'scripts', 'run.sh'))).mode & 0o111, 0o111);
   assert.deepEqual(await readFile(join(f.root, 'demo', 'assets', 'nested', 'data.bin')), Buffer.from([0, 255, 20]));
+  assert.equal((await stat(join(f.root, 'demo', 'empty'))).isDirectory(), true);
   await writeFile(join(f.root, 'demo', 'references', 'guide.md'), 'local edit');
   assert.equal((await f.call('install', { srcDir: source })).status, 409);
   assert.equal(await readFile(join(f.root, 'demo', 'references', 'guide.md'), 'utf8'), 'local edit');
+  const flat = join(f.base, 'source.md'); await writeFile(flat, skill());
+  assert.equal((await f.call('install', { srcDir: flat })).status, 409);
+  assert.equal((await f.call('remove', identity(await get(f)))).status, 200);
+  await create(f, { kind: 'flat' });
+  assert.equal((await f.call('install', { srcDir: source })).status, 409);
   assert.equal((await f.call('install', { srcDir: '' })).status, 400);
+  await assertNoStaging(f.root);
+});
+
+test('install is staged outside discovery and a failed copy publishes nothing and cleans staging', async (t) => {
+  const f = await fixture(t), source = join(f.base, 'source');
+  await mkdir(source);
+  await writeFile(join(source, 'SKILL.md'), skill());
+  await writeFile(join(source, 'resource.bin'), 'resource bytes');
+  const originalOpen = fs.open;
+  let inspected = false;
+  t.mock.method(fs, 'open', async (path, flags, ...args) => {
+    const handle = await originalOpen(path, flags, ...args);
+    if (basename(path) === 'resource.bin' && (flags & constants.O_WRONLY)) {
+      inspected = true;
+      assert.equal(dirname(dirname(path)), dirname(f.root));
+      assert.deepEqual((await f.call('list')).value.skills, []);
+      await assert.rejects(stat(join(f.root, 'demo')), { code: 'ENOENT' });
+      const write = handle.writeFile.bind(handle);
+      handle.writeFile = async (bytes) => { await write(bytes.subarray(0, 3)); throw Object.assign(new Error('injected copy failure'), { code: 'ENOSPC' }); };
+    }
+    return handle;
+  });
+  assert.equal((await f.call('install', { srcDir: source })).status, 500);
+  assert.equal(inspected, true);
+  assert.deepEqual((await f.call('list')).value.skills, []);
+  await assertNoStaging(f.root);
+});
+
+test('bundle byte, entry and depth limits fail before publication', { timeout: 30000 }, async (t) => {
+  const f = await fixture(t), source = join(f.base, 'source');
+  await mkdir(source); await writeFile(join(source, 'SKILL.md'), skill());
+  const huge = join(source, 'large.bin');
+  await writeFile(huge, ''); await truncate(huge, 32 * 1024 * 1024 + 1);
+  assert.equal((await f.call('install', { srcDir: source })).status, 413);
+  await rm(huge);
+  let deep = source;
+  for (let i = 0; i < 33; i++) { deep = join(deep, 'd'); await mkdir(deep); }
+  assert.equal((await f.call('install', { srcDir: source })).status, 400);
+  await rm(join(source, 'd'), { recursive: true });
+  for (let start = 0; start < 2048; start += 64) await Promise.all(Array.from({ length: 64 }, (_, offset) => mkdir(join(source, `empty-${start + offset}`))));
+  assert.equal((await f.call('install', { srcDir: source })).status, 413);
+  await assert.rejects(stat(join(f.root, 'demo')), { code: 'ENOENT' });
 });
 
 test('source bundle symlinks reject before creating destination', async (t) => {
-  const f = await fixture(t);
-  const source = join(f.base, 'source');
-  await mkdir(source);
-  await writeFile(join(source, 'SKILL.md'), skill());
-  await symlink(f.projectRoot, join(source, 'linked'));
+  const f = await fixture(t), source = join(f.base, 'source');
+  await mkdir(source); await writeFile(join(source, 'SKILL.md'), skill());
+  if (!await linkOrSkip(t, f.projectRoot, join(source, 'linked'), true)) return;
   assert.equal((await f.call('install', { srcDir: source })).status, 403);
   await assert.rejects(stat(join(f.root, 'demo')), { code: 'ENOENT' });
 });
 
-test('symlink skill files and ancestor roots cannot be mutated', async (t) => {
+test('symlink skill files and ancestor roots cannot be read or mutated', async (t) => {
   const f = await fixture(t);
   await mkdir(join(f.root, 'demo'), { recursive: true });
-  const outside = join(f.base, 'outside.md');
-  await writeFile(outside, skill());
-  await symlink(outside, join(f.root, 'demo', 'SKILL.md'));
-  for (const method of ['save', 'setInvocation', 'remove']) {
-    assert.equal((await f.call(method, { name: 'demo', body: skill(), modelInvocable: false })).status, 403);
+  const outside = join(f.base, 'outside.md'); await writeFile(outside, skill());
+  if (!await linkOrSkip(t, outside, join(f.root, 'demo', 'SKILL.md'))) return;
+  for (const method of ['get', 'save', 'setInvocation', 'remove']) {
+    assert.equal((await f.call(method, { name: 'demo', kind: 'dir', mode: 'update', expectedRevision: 'any', body: skill(), modelInvocable: false })).status, 403);
   }
   assert.equal(await readFile(outside, 'utf8'), skill());
   const linkedProject = join(f.base, 'linked-project');
-  await symlink(f.projectRoot, linkedProject);
-  assert.equal((await f.call('save', { projectRoot: linkedProject, name: 'demo', body: skill() })).status, 403);
+  if (!await linkOrSkip(t, f.projectRoot, linkedProject, true)) return;
+  assert.equal((await f.call('save', { projectRoot: linkedProject, mode: 'create', name: 'demo', body: skill() })).status, 403);
 });
 
 test('skill and streamed request body limits are enforced without content-length', async (t) => {
   const f = await fixture(t, { maxBodyBytes: 100 });
   assert.equal((await f.call('validate', { body: skill() + 'x'.repeat(100) })).status, 413);
-  assert.equal((await f.call('save', { name: 'demo', body: skill() + 'x'.repeat(100) })).status, 413);
+  assert.equal((await f.call('save', { mode: 'create', name: 'demo', body: skill() + 'x'.repeat(100) })).status, 413);
   const oversize = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(4194305)); controller.close(); } });
   assert.equal((await f.call('validate', {}, { body: oversize, duplex: 'half' })).status, 413);
   assert.equal((await f.call('validate', {}, { body: '[]' })).status, 400);
 });
 
-test('user writes disabled consistently and project tools use the current agent cwd', async (t) => {
+test('user read-only gate follows actual canonical roots even through project scope and DSH_HOME aliases', async (t) => {
   const f = await fixture(t, { allowUserWrite: false });
   for (const method of ['save', 'setInvocation', 'remove', 'install']) assert.equal((await f.call(method, { scope: 'user' })).status, 403);
+  setHome(t, join(f.projectRoot, '.dsh'));
+  await mkdir(join(f.root, 'demo'), { recursive: true });
+  await writeFile(join(f.root, 'demo', 'SKILL.md'), skill());
+  const current = await get(f), source = join(f.base, 'source.md'); await writeFile(source, skill('other'));
+  for (const scope of ['project', 'user']) {
+    assert.equal((await f.call('list', { scope })).value.skills[0].revision, current.revision);
+    for (const [method, extra] of [['save', { mode: 'update', body: skill() + 'change' }], ['setInvocation', { modelInvocable: false }], ['remove', {}], ['install', { srcDir: source }]]) {
+      assert.equal((await f.call(method, { scope, ...identity(current), ...extra })).status, 403, method);
+    }
+    assert.equal((await f.call('save', { scope, mode: 'create', name: 'other', body: skill('other') })).status, 403);
+  }
+  assert.equal((await get(f)).body, skill());
+  // A symlink on the DSH_HOME side still aliases the unchanged project target.
+  const alias = join(f.base, 'home-alias');
+  if (!await linkOrSkip(t, join(f.projectRoot, '.dsh'), alias, true)) return;
+  process.env.DSH_HOME = alias;
+  assert.equal((await f.call('remove', identity(current))).status, 403);
+});
+
+test('project and user scope aliases serialize across apply instances when writes are allowed', async (t) => {
+  const f = await fixture(t), alternate = await fixture(t);
+  setHome(t, join(f.projectRoot, '.dsh'));
+  const current = await create(f);
+  const results = await Promise.all([
+    f.call('save', { mode: 'update', ...identity(current), body: skill() + 'project' }),
+    alternate.call('save', { scope: 'user', mode: 'update', ...identity(current), body: skill() + 'user' }),
+  ]);
+  assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+  const body = (await get(f)).body;
+  assert.ok(body === skill() + 'project' || body === skill() + 'user');
+});
+
+test('read-only tools retain installed contracts, cwd fallback, and exact-kind reads', async (t) => {
+  const f = await fixture(t, { allowUserWrite: false });
   assert.equal(f.tools.size, 3);
-  const value = await f.tools.get('skills_manager_list').execute({}, { agent: {}, signal: new AbortController().signal });
+  const exec = { agent: {}, signal: new AbortController().signal };
+  const value = await f.tools.get('skills_manager_list').execute({}, exec);
   assert.equal(value.root, f.root);
   assert.deepEqual(f.tools.get('skills_manager_list').output.render({}, value), [{ type: 'text', text: JSON.stringify(value) }]);
   assert.equal((await f.tools.get('skills_manager_validate').execute({ body: skill() })).valid, true);
+  await create(f, { kind: 'flat' });
+  assert.deepEqual(f.tools.get('skills_manager_read').parameters.properties.kind.enum, ['dir', 'flat']);
+  const current = await f.tools.get('skills_manager_read').execute({ name: 'demo', kind: 'flat' }, exec);
+  assert.equal(current.body, skill()); assert.equal(typeof current.revision, 'string');
 });

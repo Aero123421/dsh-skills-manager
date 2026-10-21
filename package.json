@@ -1,12 +1,17 @@
 {
   "name": "dsh-skills-manager",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "scripts": {
     "test": "node --test tests/*.test.js",
     "check": "node --check index.js && node --check client.js && node --test tests/*.test.js"
   },
   "description": "Manage Agent Skills (project + user roots) from the DSH sidebar: list, preview, create, edit, delete, enable/disable, validate, install.",
-  "keywords": ["dsh", "dsh-plugin", "skills", "skill-management"],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "skills",
+    "skill-management"
+  ],
   "license": "MIT",
   "author": "Aero123421",
   "homepage": "https://github.com/Aero123421/dsh-skills-manager#readme",
@@ -24,13 +29,35 @@
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
-  "files": ["index.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg", "README.md", "LICENSE", "CHANGELOG.md", "docs/"],
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "docs/"
+  ],
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
-      "inject": ["@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-client-ui-sidebar"]
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
     }
   },
-  "engines": { "node": "^22.19.0 || >=24.0.0" }
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  }
 }

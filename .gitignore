@@ -5,3 +5,4 @@ lib/
 artifacts/
 scripts/inspect-browser.mjs
 scripts/verify-live.mjs
+scripts/verify-regressions.mjs

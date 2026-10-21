@@ -2,7 +2,7 @@
 
 Manage [Agent Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) from the DeepSeek Harness sidebar: list, preview, create, edit, delete, enable/disable, validate, and install — for both **project** (`.dsh/skills`) and **user** (`~/.dsh/skills`) roots.
 
-No dependencies, no build step. Plain `index.js` (Host) + `client.js` (browser).
+No build step. Plain `index.js` (Host) + `client.js` (browser), with the pinned `yaml` parser as the only runtime dependency.
 
 ## Preview
 
@@ -31,7 +31,7 @@ GitHubから直接入れられます（`github:` は `dsh plugin` が受け付�
 dsh plugin --profile web add github:Aero123421/dsh-skills-manager
 
 # バージョンを固定する（再現性が必要な場合に推奨）
-dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.2.0
+dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.3.0
 ```
 
 インストール後に再起動（または HMR リロード）すると、左サイドバーに **SKILLS** が増えます。
@@ -39,14 +39,16 @@ dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.2.0
 会話中のエージェント経由で入れる場合:
 
 > `plugin_manager` で `install_bundle` を呼び、target に
-> `github:Aero123421/dsh-skills-manager`（または `#v0.2.0` 付き）を指定してください。
+> `github:Aero123421/dsh-skills-manager`（または `#v0.3.0` 付き）を指定してください。
 
 ### Update / Uninstall
+
+**v0.2.0以前を使用している場合は、スキルをバックアップしてからv0.3.0へ更新してください。** v0.3.0は保存の原子性、同名スキルの識別、更新競合の検出を修正したリリースです。旧版ですでに破損・上書きされた内容を自動復元するものではありません。
 
 ```sh
 # 更新: いったん外して入れ直し（DSHのgit/tarball更新フロー）
 dsh plugin --profile web remove dsh-skills-manager
-dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.2.0
+dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.3.0
 
 # 削除
 dsh plugin --profile web remove dsh-skills-manager
@@ -58,10 +60,11 @@ dsh plugin --profile web remove dsh-skills-manager
 - **プロジェクト** = `<projectRoot>/.dsh/skills`、**ユーザー** = `$DSH_HOME/skills`（未設定なら `~/.dsh/skills`）。
 - プロジェクトのパスを入力して **開く**。参照ボタンはHostがディレクトリ選択を提供する環境で利用できます。
 - 一覧は名前・説明で検索できます。クリックすると手順と保存場所、利用設定を表示します。
-- **新規作成／編集**でfrontmatterと手順を編集し、形式チェック・保存できます。
+- **新規作成／編集**でfrontmatterと手順を編集し、形式チェック・保存できます。新規作成は既存の同名スキルを上書きせず、更新・切替・削除は読み込んだ版と一致するときだけ実行します。競合（409）の場合は内容を確認し、再読み込みしてください。
 - **エージェントからの利用**は `disable-model-invocation`、**スラッシュコマンド**は `user-invocable` に対応します。未知のmetadataやコメントは保持します。
 - **スキルをインストール**でDSHホスト上のフォルダ（`SKILL.md`入り）または `.md` ファイルを指定します。同梱リソースもコピーし、既存のインストール先は上書きしません。GitHubのスキルを直接ダウンロードする機能ではありません。
 - 削除は確認ダイアログを経由し、対象のスキルと同梱ファイルを削除します。
+- 未保存の下書きはブラウザのローカルストレージにプロジェクト・形式別で保持します。保存・明示的な破棄で消去します。ストレージが無効または容量不足の場合は保持できません。
 
 画面は公式Plugin Managerの余白・文字サイズ・管理リストのパターンに合わせ、`--dsw-alias-*` のテーマ色を使用しています。Harness内部のClientパッケージへのruntime importや独自の配色テーマはありません。
 
@@ -82,6 +85,10 @@ Host は認証済み `/api` チャネルに exact route を出します（auth +
 
 - `POST /api/dsh-skills-manager/list | get | save | remove | validate | setInvocation | install`
 - JSON: `{ ok: true, value }` / `{ ok: false, error }`
+- v0.3.0の変更系APIはv0.2.0と互換ではありません。`list` / `get` が返す `kind` (`dir` / `flat`) と `revision` で対象を識別します。
+- `save`: 新規は `mode: 'create'`、更新は `mode: 'update'` + `kind` + `expectedRevision` が必須です。
+- `setInvocation` / `remove`: `kind` + `expectedRevision` が必須です。古い版・存在しない更新対象・作成時の同名衝突は409で拒否します。
+- `get`: 同名のフォルダ版・単体版が共存している場合は `kind` を指定してください。曖昧な対象を自動選択しません。
 
 Agent tools（任意、同梱）: `skills_manager_list`、`skills_manager_read`、`skills_manager_validate`
 
@@ -108,18 +115,21 @@ description: What this skill does and when to use it.
 
 - このプラグインは認証済みのDSH利用者がHost所有者としてローカルファイルを管理するためのものです。別ユーザー同士を隔離するsandboxではありません。プロジェクトパスは利用者が明示指定します（workspace allowlistへの囲い込みではありません）。
 - skill名のパス区切り・`..`・Windows予約名を拒否し、書き込み先とインストール元のsymbolic linkを保守的に拒否します。Host所有者による同時ファイル操作に対する完全なrace-proof保証ではありません。
-- frontmatterは `name`、`description`、invocationのフィールドを検証します。未知のYAMLは保持しますが、完全なYAML構文検証器ではありません。
-- `user` scopeへの書き込みは `allowUserWrite: false` で無効化できます。
-- HostはNode標準APIのみ使用し、shell-out・スキルの自動実行・外部ダウンロードを行いません。
+- frontmatterは実際のYAMLパーサで構文・重複キー・フィールド型を検証します。利用設定の切替では未知のmetadataやコメントを保持し、引用符付きのキーも扱います。
+- `allowUserWrite: false` は実際の保存先にも適用します。ユーザー用保存先とプロジェクト用保存先が重なっていても書き込みを許可しません。
+- 保存は一時ファイルからの原子的な置換と同名操作の直列化を使用します。`revision` による競合検出は外部エディタ等のあらゆる同時操作を完全にトランザクション化するものではありません。
+- Hostはshell-out・スキルの自動実行・外部ダウンロードを行いません。
 - Linux/macOS/Windows向けのpath・改行処理を使用していますが、実機での操作検証は現時点で **Linux + DSH 0.2.1-rc.2** のみです。macOS/Windowsでの実動作確認は未実施です。
 
 ## Verification
 
-`npm run check`: 8 host regression tests pass. Real DSH Web acceptance covered create/edit/install/toggles/delete, light/dark themes and a 390px viewport, with no browser errors. See [verification details](docs/verification.md).
+`npm run check`: **34 tests** (21 Host + 13 Client) cover the reviewed data-loss cases, asynchronous UI races, YAML edits and mounted API URLs. Real DSH Web acceptance also checks actual concurrent saves, exact-format deletion, create conflicts and a prefix-stripping mount simulation, in addition to CRUD/install/toggles and light/dark themes. See [verification details](docs/verification.md).
+
+[![Check](https://github.com/Aero123421/dsh-skills-manager/actions/workflows/check.yml/badge.svg)](https://github.com/Aero123421/dsh-skills-manager/actions/workflows/check.yml)
 
 ## Development
 
-依存ゼロ・ビルド不要。`index.js` / `client.js` を編集して `node --check` で構文確認し、
+`npm ci --ignore-scripts` → `npm run check` でHostとClientの回帰テストを実行できます。ビルドは不要です。
 `plugin_manager` の `install_bundle`（target = このディレクトリの絶対パス）で開発用 profile に入れて動作確認できます。
 
 ## License

@@ -2,7 +2,9 @@
 import { homedir } from 'node:os';
 import { join, resolve, basename, parse, isAbsolute, relative, sep } from 'node:path';
 import { constants } from 'node:fs';
-import { readdir, readFile, mkdir, rm, lstat, copyFile, open } from 'node:fs/promises';
+import fs, { readdir, mkdir, rm, lstat, realpath } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { parseDocument, isMap, visit } from 'yaml';
 
 export const name = 'dsh-skills-manager';
 const NS = name;
@@ -73,78 +75,176 @@ async function noSymlinks(path) {
   }
   return absolute;
 }
-async function locate(root, skillName) {
+function checkKind(kind, required = false) {
+  if (kind === undefined && !required) return;
+  if (kind !== 'dir' && kind !== 'flat') throw fail('kind must be dir or flat');
+}
+function skillPath(root, skillName, kind) {
+  return kind === 'dir' ? join(root, skillName, 'SKILL.md') : join(root, `${skillName}.md`);
+}
+async function locate(root, skillName, kind, requireKind = false) {
+  checkKind(kind);
   await noSymlinks(root);
-  for (const [kind, path] of [['dir', join(root, skillName, 'SKILL.md')], ['flat', join(root, `${skillName}.md`)]]) {
+  const found = [];
+  for (const candidate of kind ? [kind] : ['dir', 'flat']) {
+    const path = skillPath(root, skillName, candidate);
     await noSymlinks(path);
+    const parent = candidate === 'dir' ? await info(join(root, skillName)) : null;
+    if (parent && !parent.isDirectory()) throw fail('skill directory must be a directory');
     const st = await info(path);
     if (st) {
       if (!st.isFile()) throw fail('skill path must be a regular file');
-      return { kind, path };
+      found.push({ kind: candidate, path });
     }
   }
-  return null;
+  if (found.length > 1) throw fail('ambiguous skill name; specify kind (dir or flat)', 409);
+  if (requireKind) checkKind(kind, true);
+  return found[0] ?? null;
+}
+async function ensureVacant(root, skillName) {
+  for (const path of [join(root, skillName), join(root, `${skillName}.md`)]) {
+    await noSymlinks(path);
+    if (await info(path)) throw fail('target skill already exists (dir or flat)', 409);
+  }
+}
+// Resolve even a not-yet-created root through its closest existing ancestor.
+async function canonicalPath(path) {
+  let ancestor = resolve(path);
+  const suffix = [];
+  while (true) {
+    try { return join(await realpath(ancestor), ...suffix); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      suffix.unshift(basename(ancestor));
+      const parent = parse(ancestor).dir;
+      if (parent === ancestor) throw error;
+      ancestor = parent;
+    }
+  }
+}
+// Shared across apply() instances and scopes, and keyed by name, not kind: a
+// create/install must not race another format. This serializes this process,
+// not unrelated local-owner filesystem writers or other DSH processes.
+const skillLocks = new Map();
+async function serialized(root, skillName, operation) {
+  const key = `${root}\0${skillName}`;
+  const previous = skillLocks.get(key) ?? Promise.resolve();
+  let release;
+  const gate = new Promise((done) => { release = done; });
+  skillLocks.set(key, gate);
+  await previous;
+  try { return await operation(); }
+  finally { release(); if (skillLocks.get(key) === gate) skillLocks.delete(key); }
+}
+function revisionOf(bytes) { return createHash('sha256').update(bytes).digest('hex'); }
+function checkRevision(payload, revision) {
+  if (typeof payload.expectedRevision !== 'string' || !payload.expectedRevision) throw fail('expectedRevision is required');
+  if (payload.expectedRevision !== revision) throw fail('skill changed; reload before retrying', 409);
+}
+function temporaryPath(directory) { return join(directory, `.dsh-skills-${randomUUID()}`); }
+async function discard(path, directory = false) {
+  // Only call for a freshly generated staging path owned by this operation.
+  await rm(path, { recursive: directory, force: true });
+}
+async function atomicWrite(path, body, create = false) {
+  await noSymlinks(path);
+  const temporary = temporaryPath(parse(path).dir);
+  let handle;
+  try {
+    handle = await fs.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+    await handle.writeFile(body, 'utf8');
+    await handle.sync();
+    await handle.close(); handle = null;
+    await noSymlinks(path);
+    // A hard link publishes new files without an overwrite race; rename replaces
+    // existing files atomically. Never open the original with O_TRUNC.
+    if (create) await fs.link(temporary, path);
+    else await fs.rename(temporary, path);
+  } catch (error) {
+    if (error.code === 'EEXIST') throw fail('target skill already exists', 409);
+    throw error;
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    await discard(temporary).catch(() => {});
+  }
 }
 
-// Only managed top-level fields are interpreted; unknown YAML (including nested
-// metadata and block scalars) remains opaque and is never serialized back out.
-function scalar(raw) {
-  const value = raw.trim();
-  if (value.startsWith('"')) {
-    const match = /^("(?:[^"\\]|\\.)*")(?:\s+#.*)?\s*$/.exec(value);
-    if (!match) throw fail('invalid quoted frontmatter value');
-    try { return JSON.parse(match[1]); } catch { throw fail('invalid quoted frontmatter value'); }
+function toBool(value, fallback) {
+  if (value === undefined) return fallback;
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === '1') return true;
+  if (value === 0 || value === '0') return false;
+  if (typeof value === 'string') {
+    if (/^(true|yes|on)$/i.test(value)) return true;
+    if (/^(false|no|off)$/i.test(value)) return false;
   }
-  if (value.startsWith("'")) {
-    const match = /^'((?:[^']|'')*)'(?:\s+#.*)?\s*$/.exec(value);
-    if (!match) throw fail('invalid quoted frontmatter value');
-    return match[1].replace(/''/g, "'");
-  }
-  return value.replace(/\s+#.*$/, '').trim();
+  throw fail('invocation field must be a boolean');
 }
 function parseFrontmatter(body) {
   const match = /^(---[ \t]*\r?\n)([\s\S]*?)(^---[ \t]*(?:\r?\n|$))([\s\S]*)/m.exec(body);
   if (!match || match.index !== 0) return { error: 'missing YAML frontmatter (--- ... ---)' };
-  const lines = match[2].split(/\r?\n/);
-  const data = Object.create(null);
-  const managed = new Set(['name', 'description', 'disable-model-invocation', 'user-invocable']);
   try {
-    for (let i = 0; i < lines.length; i++) {
-      const entry = /^([a-zA-Z][\w-]*):[ \t]*(.*)$/.exec(lines[i]);
-      if (!entry || !managed.has(entry[1])) continue;
-      const [, key, raw] = entry;
-      if (Object.hasOwn(data, key)) return { error: `duplicate frontmatter field: ${key}` };
-      if (key === 'description' && /^[|>][+-]?(?:\s+#.*)?$/.test(raw)) {
-        const block = [];
-        while (i + 1 < lines.length && (/^[ \t]/.test(lines[i + 1]) || lines[i + 1] === '')) block.push(lines[++i]);
-        data[key] = block.map((line) => line.trim()).join(raw[0] === '>' ? ' ' : '\n').trim();
-      } else data[key] = scalar(raw);
-    }
-    if (!data.name) return { error: 'frontmatter requires name' };
+    const doc = parseDocument(match[2], { keepSourceTokens: true, uniqueKeys: true });
+    if (doc.errors.length) throw fail(doc.errors[0].message);
+    if (!isMap(doc.contents)) throw fail('frontmatter must be a YAML mapping');
+    const data = doc.toJS({ maxAliasCount: 100 });
+    if (typeof data.name !== 'string' || !data.name.trim()) throw fail('frontmatter requires name string');
     checkName(data.name);
-    if (!data.description) return { error: 'frontmatter requires description' };
-    for (const key of ['disable-model-invocation', 'user-invocable']) {
-      if (data[key] !== undefined && !/^(true|false|yes|no|on|off|1|0)$/i.test(data[key])) return { error: `frontmatter field "${key}" must be a boolean` };
+    if (typeof data.description !== 'string' || !data.description.trim()) throw fail('frontmatter requires description string');
+    for (const [legacy, canonical] of [['disableModelInvocation', 'disable-model-invocation'], ['modelInvocable', 'disable-model-invocation'], ['userInvocable', 'user-invocable']]) {
+      if (Object.hasOwn(data, legacy)) throw fail(`frontmatter field "${legacy}" is unsupported; use "${canonical}"`);
     }
-    return { data, prefix: match[1], raw: match[2], closing: match[3], content: match[4] };
+    for (const key of ['disable-model-invocation', 'user-invocable']) {
+      if (!Object.hasOwn(data, key)) continue;
+      try { toBool(data[key]); } catch { throw fail(`frontmatter field "${key}" must be a boolean`); }
+    }
+    return { data, doc, prefix: match[1], raw: match[2], closing: match[3], content: match[4] };
   } catch (error) { return { error: error.message }; }
 }
-function toBool(value, fallback) { return value === undefined ? fallback : /^(true|yes|on|1)$/i.test(value); }
-function patchInvocation(body, parsed, payload) {
-  let raw = parsed.raw;
+function patchInvocation(parsed, payload) {
+  const edits = [], additions = [];
+  const anchoredValues = new Map(), targetedOffsets = new Set();
   const newline = parsed.prefix.endsWith('\r\n') ? '\r\n' : '\n';
   for (const [field, key, invert] of [['modelInvocable', 'disable-model-invocation', true], ['userInvocable', 'user-invocable', false]]) {
     if (payload[field] === undefined) continue;
     if (typeof payload[field] !== 'boolean') throw fail(`${field} must be a boolean`);
-    const value = invert ? !payload[field] : payload[field];
-    const pattern = new RegExp(`^${key}:[^\\r\\n]*(?:\\r?\\n|$)`, 'm');
-    if (pattern.test(raw)) raw = raw.replace(pattern, (line) => {
-      const comment = /([ \t]+#.*?)(?:\r?\n)?$/.exec(line)?.[1] ?? '';
-      const ending = /\r?\n$/.exec(line)?.[0] ?? '';
-      return `${key}: ${value}${comment}${ending}`;
-    });
-    else raw += `${raw && !raw.endsWith('\n') ? newline : ''}${key}: ${value}${newline}`;
+    const value = String(invert ? !payload[field] : payload[field]);
+    const node = parsed.doc.get(key, true);
+    if (node?.range) {
+      const [start, end] = node.range;
+      targetedOffsets.add(start);
+      if (node.anchor) anchoredValues.set(node, parsed.data[key]);
+      const source = parsed.raw.slice(start, end);
+      // Block scalars can encode native-compatible strings such as |-/false.
+      const blockComment = /^[|>][^\r\n]*?([ \t]+#[^\r\n]*)/.exec(source)?.[1] ?? '';
+      const ending = /\r?\n$/.exec(source)?.[0] ?? '';
+      edits.push({ start, end, text: value + blockComment + ending });
+    } else additions.push(`${key}: ${value}`);
   }
+  // Changing an anchored scalar must not change untargeted invocation fields or
+  // unknown metadata that alias its old value. Resolve by node, not anchor name
+  // (YAML may reuse anchor names), and materialize just those scalar aliases.
+  if (anchoredValues.size) visit(parsed.doc, {
+    Alias(_key, alias) {
+      const target = alias.resolve(parsed.doc);
+      if (anchoredValues.has(target) && !targetedOffsets.has(alias.range[0])) {
+        edits.push({ start: alias.range[0], end: alias.range[1], text: JSON.stringify(anchoredValues.get(target)) });
+      }
+    },
+  });
+  if (additions.length) {
+    const map = parsed.doc.contents;
+    if (map.flow) {
+      const offset = map.srcToken.start.offset + 1;
+      edits.push({ start: offset, end: offset, text: `${additions.join(', ')}, ` });
+    } else {
+      const indent = ' '.repeat(map.srcToken.indent ?? 0);
+      const offset = parsed.raw.length;
+      edits.push({ start: offset, end: offset, text: `${offset && !parsed.raw.endsWith('\n') ? newline : ''}${additions.map((line) => indent + line).join(newline)}${newline}` });
+    }
+  }
+  let raw = parsed.raw;
+  for (const { start, end, text } of edits.sort((a, b) => b.start - a.start)) raw = raw.slice(0, start) + text + raw.slice(end);
   return parsed.prefix + raw + parsed.closing + parsed.content;
 }
 
@@ -158,23 +258,40 @@ export function apply(ctx, input = {}) {
   }
   async function readSkill(path) {
     await noSymlinks(path);
-    const st = await info(path);
-    if (!st?.isFile()) throw fail('skill path must be a regular file');
-    if (st.size > config.maxBodyBytes) throw fail('body too large', 413);
-    return checkBody(await readFile(path, 'utf8'));
+    const before = await info(path);
+    if (!before?.isFile()) throw fail('skill path must be a regular file');
+    if (before.size > config.maxBodyBytes) throw fail('body too large', 413);
+    const handle = await fs.open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const st = await handle.stat();
+      if (!st.isFile()) throw fail('skill path must be a regular file');
+      if (st.size > config.maxBodyBytes) throw fail('body too large', 413);
+      const bytes = await handle.readFile();
+      if (bytes.length > config.maxBodyBytes) throw fail('body too large', 413);
+      return { body: bytes.toString('utf8'), revision: revisionOf(bytes) };
+    } finally { await handle.close(); }
   }
   function validated(body) {
     const parsed = parseFrontmatter(checkBody(body));
     if (parsed.error) throw fail(`invalid skill: ${parsed.error}`);
     return parsed;
   }
-  async function writeSkill(path, body) {
-    await noSymlinks(path);
-    const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0), 0o600);
-    try { await handle.writeFile(body, 'utf8'); } finally { await handle.close(); }
-  }
   function scopeOf(payload) { return payload.scope ?? 'project'; }
-  function writable(scope) { if (scope === 'user' && !config.allowUserWrite) throw fail('user writes disabled', 403); }
+  async function rootFor(payload, write = false) {
+    const scope = scopeOf(payload), root = dirFor(scope, payload);
+    if (write && !config.allowUserWrite) {
+      if (scope === 'user' || await canonicalPath(root) === await canonicalPath(dirFor('user', {}))) throw fail('user writes disabled', 403);
+    }
+    await noSymlinks(root);
+    return { root, scope, canonical: await canonicalPath(root) };
+  }
+  async function existing(root, payload) {
+    const loc = await locate(root, payload.name, payload.kind, true);
+    if (!loc) throw fail('skill no longer exists; reload before retrying', 409);
+    const current = await readSkill(loc.path);
+    checkRevision(payload, current.revision);
+    return { ...loc, ...current };
+  }
   async function listSkills(root) {
     await noSymlinks(root);
     let entries;
@@ -187,68 +304,91 @@ export function apply(ctx, input = {}) {
       const skillName = kind === 'dir' ? entry.name : basename(entry.name, '.md');
       const path = kind === 'dir' ? join(root, entry.name, 'SKILL.md') : join(root, entry.name);
       if (!(await info(path))) continue;
+      let revision;
       try {
+        const current = await readSkill(path);
+        revision = current.revision;
         checkName(skillName);
-        const parsed = validated(await readSkill(path));
+        const parsed = validated(current.body);
         if (parsed.data.name !== skillName) throw fail('name mismatch between directory/file and frontmatter');
-        result.push({ name: skillName, storageName: skillName, kind, valid: true, path, description: parsed.data.description,
+        result.push({ name: skillName, storageName: skillName, kind, revision, valid: true, path, description: parsed.data.description,
           modelInvocable: !toBool(parsed.data['disable-model-invocation'], false), userInvocable: toBool(parsed.data['user-invocable'], true) });
-      } catch (error) { result.push({ name: skillName, storageName: skillName, kind, valid: false, error: error.message, path }); }
+      } catch (error) { result.push({ name: skillName, storageName: skillName, kind, revision, valid: false, error: error.message, path }); }
     }
-    return result.sort((a, b) => a.name.localeCompare(b.name));
+    return result.sort((a, b) => a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind));
   }
   const handlers = {
     async list(payload) {
-      const scope = scopeOf(payload), root = dirFor(scope, payload);
+      const { scope, root } = await rootFor(payload);
       return { skills: await listSkills(root), root, scope };
     },
     async get(payload) {
-      const scope = scopeOf(payload), root = dirFor(scope, payload);
+      const { scope, root } = await rootFor(payload);
       checkName(payload.name);
-      const loc = await locate(root, payload.name);
+      const loc = await locate(root, payload.name, payload.kind);
       if (!loc) throw fail('not found', 404);
-      const body = await readSkill(loc.path), parsed = parseFrontmatter(body);
-      return { ...loc, body, frontmatter: parsed.data ?? null, parseError: parsed.error ?? null, root, scope };
+      const current = await readSkill(loc.path), parsed = parseFrontmatter(current.body);
+      return { name: payload.name, ...loc, ...current, frontmatter: parsed.data ?? null, parseError: parsed.error ?? null, root, scope };
     },
     async validate(payload) {
       const parsed = parseFrontmatter(checkBody(payload.body));
       return parsed.error ? { valid: false, error: parsed.error } : { valid: true, frontmatter: parsed.data };
     },
     async save(payload) {
-      const scope = scopeOf(payload); writable(scope); checkName(payload.name);
+      const { scope, root, canonical } = await rootFor(payload, true);
+      checkName(payload.name);
+      if (payload.mode !== 'create' && payload.mode !== 'update') throw fail('mode must be create or update');
+      checkKind(payload.kind);
       const parsed = validated(payload.body);
       if (parsed.data.name !== payload.name) throw fail('name mismatch between request and frontmatter');
-      const root = dirFor(scope, payload);
-      await noSymlinks(root);
-      await mkdir(root, { recursive: true });
-      const kind = payload.kind === 'flat' ? 'flat' : 'dir';
-      const path = kind === 'flat' ? join(root, `${payload.name}.md`) : join(root, payload.name, 'SKILL.md');
-      await noSymlinks(path);
-      if (kind === 'dir') await mkdir(join(root, payload.name), { recursive: true });
-      await writeSkill(path, payload.body);
-      return { saved: true, scope, kind, root };
+      return serialized(canonical, payload.name, async () => {
+        let kind = payload.kind ?? 'dir';
+        if (payload.mode === 'update') {
+          const current = await existing(root, payload);
+          kind = current.kind;
+          await atomicWrite(current.path, payload.body);
+        } else {
+          await ensureVacant(root, payload.name);
+          await mkdir(root, { recursive: true });
+          if (kind === 'flat') await atomicWrite(skillPath(root, payload.name, kind), payload.body, true);
+          else {
+            // Stage outside skills/: native DSH discovery also scans dot dirs.
+            const stage = temporaryPath(parse(root).dir);
+            await mkdir(stage, { mode: 0o700 });
+            try {
+              await atomicWrite(join(stage, 'SKILL.md'), payload.body, true);
+              await ensureVacant(root, payload.name);
+              await fs.rename(stage, join(root, payload.name));
+            } finally { await discard(stage, true).catch(() => {}); }
+          }
+        }
+        return { saved: true, name: payload.name, scope, kind, root, path: skillPath(root, payload.name, kind), revision: revisionOf(payload.body) };
+      });
     },
     async setInvocation(payload) {
-      const scope = scopeOf(payload); writable(scope); checkName(payload.name);
-      const loc = await locate(dirFor(scope, payload), payload.name);
-      if (!loc) throw fail('not found', 404);
-      const body = await readSkill(loc.path), parsed = validated(body);
-      const next = patchInvocation(body, parsed, payload);
-      checkBody(next);
-      await writeSkill(loc.path, next);
-      return { saved: true, path: loc.path };
+      const { scope, root, canonical } = await rootFor(payload, true);
+      checkName(payload.name);
+      return serialized(canonical, payload.name, async () => {
+        const current = await existing(root, payload), parsed = validated(current.body);
+        const next = patchInvocation(parsed, payload);
+        validated(next);
+        await atomicWrite(current.path, next);
+        return { saved: true, name: payload.name, scope, root, kind: current.kind, path: current.path, revision: revisionOf(next) };
+      });
     },
     async remove(payload) {
-      const scope = scopeOf(payload); writable(scope); checkName(payload.name);
-      const root = dirFor(scope, payload), loc = await locate(root, payload.name);
-      if (!loc) throw fail('not found', 404);
-      const target = loc.kind === 'dir' ? join(root, payload.name) : loc.path;
-      await noSymlinks(target);
-      await rm(target, { recursive: loc.kind === 'dir' });
-      return { removed: true };
+      const { root, canonical } = await rootFor(payload, true);
+      checkName(payload.name);
+      return serialized(canonical, payload.name, async () => {
+        const current = await existing(root, payload);
+        const target = current.kind === 'dir' ? join(root, payload.name) : current.path;
+        await noSymlinks(target);
+        await rm(target, { recursive: current.kind === 'dir' });
+        return { removed: true, name: payload.name, kind: current.kind };
+      });
     },
     async install(payload) {
-      const scope = scopeOf(payload); writable(scope);
+      const { scope, root, canonical } = await rootFor(payload, true);
       if (typeof payload.srcDir !== 'string' || !payload.srcDir.trim()) throw fail('srcDir is required');
       const src = resolve(payload.srcDir.trim());
       if (parse(src).root === src) throw fail('invalid srcDir');
@@ -256,49 +396,77 @@ export function apply(ctx, input = {}) {
       const st = await info(src);
       if (!st) throw fail('srcDir not found', 404);
       if (!st.isDirectory() && !(st.isFile() && src.endsWith('.md'))) throw fail('srcDir must be a skill bundle directory or .md file');
-      const body = await readSkill(st.isDirectory() ? join(src, 'SKILL.md') : src);
-      const parsed = validated(body), skillName = parsed.data.name;
-      const root = dirFor(scope, payload);
-      const target = st.isDirectory() ? join(root, skillName) : join(root, `${skillName}.md`);
-      await noSymlinks(root); await noSymlinks(target);
-      if (await info(target)) throw fail('target skill already exists', 409);
+      const initial = await readSkill(st.isDirectory() ? join(src, 'SKILL.md') : src);
+      const skillName = validated(initial.body).data.name;
+      const kind = st.isDirectory() ? 'dir' : 'flat';
+      const target = kind === 'dir' ? join(root, skillName) : skillPath(root, skillName, kind);
       // Reject destination nesting inside the source before creating anything.
       const rel = relative(src, target);
-      if (st.isDirectory() && (rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel)))) throw fail('target must not be inside source bundle');
-      const files = [];
-      let totalBytes = 0;
-      async function inspect(directory, depth = 0) {
-        if (depth > 32) throw fail('bundle nesting too deep');
-        for (const entry of await readdir(directory, { withFileTypes: true })) {
-          const path = join(directory, entry.name), item = await lstat(path);
-          if (item.isSymbolicLink()) throw fail('bundle symbolic links are not allowed', 403);
-          if (item.isDirectory()) await inspect(path, depth + 1);
-          else if (item.isFile()) {
-            totalBytes += item.size;
-            files.push({ path, relative: relative(src, path) });
-            if (totalBytes > MAX_BUNDLE_BYTES || files.length > MAX_BUNDLE_FILES) throw fail('bundle too large', 413);
-          } else throw fail('bundle must contain only regular files and directories');
-        }
-      }
-      if (st.isDirectory()) await inspect(src);
-      await mkdir(root, { recursive: true });
-      if (st.isDirectory()) {
-        // A new directory is claimed exclusively; never merge or overwrite an installed bundle.
-        try { await mkdir(target); } catch (error) { if (error.code === 'EEXIST') throw fail('target skill already exists', 409); throw error; }
-        try {
-          for (const file of files) {
-            await noSymlinks(file.path);
-            const dest = join(target, file.relative);
-            await noSymlinks(dest);
-            await mkdir(parse(dest).dir, { recursive: true });
-            await copyFile(file.path, dest, constants.COPYFILE_EXCL);
+      if (kind === 'dir' && (rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel)))) throw fail('target must not be inside source bundle');
+      return serialized(canonical, skillName, async () => {
+        await ensureVacant(root, skillName);
+        const entries = [];
+        let inspectedBytes = 0;
+        async function inspect(directory, depth = 0) {
+          if (depth > 32) throw fail('bundle nesting too deep');
+          for (const entry of await readdir(directory, { withFileTypes: true })) {
+            const path = join(directory, entry.name), item = await lstat(path);
+            if (item.isSymbolicLink()) throw fail('bundle symbolic links are not allowed', 403);
+            if (!item.isDirectory() && !item.isFile()) throw fail('bundle must contain only regular files and directories');
+            if (item.isFile()) inspectedBytes += item.size;
+            entries.push({ path, relative: relative(src, path), directory: item.isDirectory(), mode: item.mode & 0o777 });
+            // Count directories too, so a tree of empty directories is bounded.
+            if (inspectedBytes > MAX_BUNDLE_BYTES || entries.length > MAX_BUNDLE_FILES) throw fail('bundle too large', 413);
+            if (item.isDirectory()) await inspect(path, depth + 1);
           }
-        } catch (error) { await noSymlinks(target); await rm(target, { recursive: true, force: true }); throw error; }
-      } else {
-        try { await copyFile(src, target, constants.COPYFILE_EXCL); }
-        catch (error) { if (error.code === 'EEXIST') throw fail('target skill already exists', 409); throw error; }
-      }
-      return { installed: true, name: skillName, kind: st.isDirectory() ? 'dir' : 'flat', root };
+        }
+        if (kind === 'dir') await inspect(src);
+        await mkdir(root, { recursive: true });
+        // Keep incomplete bundles outside the native DSH discovery root.
+        const stage = temporaryPath(parse(root).dir);
+        let copiedBytes = 0;
+        async function copyBounded(source, dest) {
+          await noSymlinks(source);
+          const input = await fs.open(source, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+          let output;
+          try {
+            const item = await input.stat();
+            if (!item.isFile()) throw fail('bundle must contain only regular files');
+            if (copiedBytes + item.size > MAX_BUNDLE_BYTES) throw fail('bundle too large', 413);
+            output = await fs.open(dest, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), item.mode & 0o777);
+            const buffer = Buffer.alloc(65536);
+            while (true) {
+              const { bytesRead } = await input.read(buffer, 0, Math.min(buffer.length, MAX_BUNDLE_BYTES - copiedBytes + 1), null);
+              if (!bytesRead) break;
+              copiedBytes += bytesRead;
+              if (copiedBytes > MAX_BUNDLE_BYTES) throw fail('bundle too large', 413);
+              await output.writeFile(buffer.subarray(0, bytesRead));
+            }
+            // Creation modes are filtered by umask; retain executable scripts.
+            await output.chmod(item.mode & 0o777);
+            await output.sync();
+          } finally { await input.close(); if (output) await output.close(); }
+        }
+        try {
+          if (kind === 'dir') {
+            await mkdir(stage, { mode: 0o700 });
+            for (const entry of entries) {
+              const dest = join(stage, entry.relative);
+              if (entry.directory) await mkdir(dest, { mode: entry.mode | 0o700 });
+              else await copyBounded(entry.path, dest);
+            }
+          } else await copyBounded(src, stage);
+          const snapshot = await readSkill(kind === 'dir' ? join(stage, 'SKILL.md') : stage);
+          if (validated(snapshot.body).data.name !== skillName) throw fail('source skill changed during install', 409);
+          await ensureVacant(root, skillName);
+          if (kind === 'dir') await fs.rename(stage, target);
+          else await fs.link(stage, target);
+          return { installed: true, name: skillName, kind, root, scope, revision: snapshot.revision };
+        } catch (error) {
+          if (error.code === 'EEXIST' || error.code === 'ENOTEMPTY') throw fail('target skill already exists', 409);
+          throw error;
+        } finally { await discard(stage, kind === 'dir').catch(() => {}); }
+      });
     },
   };
 
@@ -342,7 +510,7 @@ export function apply(ctx, input = {}) {
     const properties = { scope: { type: 'string', enum: ['project', 'user'] }, projectRoot: { type: 'string', description: 'Absolute project path; defaults to the calling agent working directory.' } };
     for (const [toolName, method, description, extra, required] of [
       ['skills_manager_list', 'list', 'List installed Agent Skills (project/user).', {}, []],
-      ['skills_manager_read', 'get', 'Read one skill body by name.', { name: { type: 'string' } }, ['name']],
+      ['skills_manager_read', 'get', 'Read one skill body by name and optional storage kind (required for duplicate names).', { name: { type: 'string' }, kind: { type: 'string', enum: ['dir', 'flat'] } }, ['name']],
       ['skills_manager_validate', 'validate', 'Validate a SKILL.md body without writing.', { body: { type: 'string' } }, ['body']],
     ]) {
       tools.register({
