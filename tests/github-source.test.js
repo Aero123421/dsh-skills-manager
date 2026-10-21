@@ -83,7 +83,10 @@ test('download fixed commit snapshots and only complete selected bundles', async
   assert.deepEqual(result, { source: 'https://github.com/acme/skills/tree/v1/skills/demo', commit: COMMIT });
   assert.equal(await readFile(join(destination, 'skills/demo/SKILL.md'), 'utf8'), SKILL);
   assert.equal(await readFile(join(destination, 'skills/demo/scripts/run.sh'), 'utf8'), script);
-  assert.equal((await stat(join(destination, 'skills/demo/scripts/run.sh'))).mode & 0o111, 0o111);
+  // Windows has no Unix executable permission bits; content is verified on every OS above.
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(join(destination, 'skills/demo/scripts/run.sh'))).mode & 0o111, 0o111);
+  }
   assert.deepEqual(await readdir(join(destination, 'skills/demo/empty')), []);
   assert.equal(rawCalls(s).length, 2);
   assert.ok(s.calls.some(({ url }) => url === `${API}/commits/v1`));
