@@ -1,0 +1,11 @@
+# dsh-skills-manager bundle layer.
+#
+# Host half (index.js) serves skill CRUD over exact routes on DSH's
+# authenticated /api channel; browser half (client.js) adds the SKILLS
+# entry to the sidebar. No dependencies, no build step: plain JS.
+- insert:
+    - id: dsh-skills-manager
+      name: dsh-skills-manager
+      config:
+        allowUserWrite: true
+        maxBodyBytes: 262144
