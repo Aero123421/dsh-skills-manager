@@ -9,6 +9,10 @@ const HASH = /^[a-f0-9]{64}$/i;
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const check = signal => { if (signal?.aborted) throw fail('GitHub update operation aborted', 499); };
+function sourceOf(value) {
+  try { return parseGithubSource(value).display; }
+  catch (error) { throw fail(error.message, 400); }
+}
 function context(payload) {
   return { scope: payload.scope ?? 'project', ...(payload.projectRoot !== undefined && { projectRoot: payload.projectRoot }) };
 }
@@ -107,11 +111,11 @@ export function createGithubUpdater({ remote, getState, snapshotCandidate, apply
         if (payload.expectedRevision !== undefined && payload.expectedRevision !== state.revision) throw fail('skill changed; reload its detail before checking updates', 409);
         let source;
         if (state.origin) {
-          source = parseGithubSource(state.origin.source).display;
-          if (payload.source !== undefined && parseGithubSource(payload.source).display !== source) throw fail('tracked GitHub source changed; do not silently retarget an update', 409);
+          source = sourceOf(state.origin.source);
+          if (payload.source !== undefined && sourceOf(payload.source) !== source) throw fail('tracked GitHub source changed; do not silently retarget an update', 409);
         } else {
           if (typeof payload.source !== 'string' || !payload.source) throw fail('this skill has no recorded GitHub source; enter its repository explicitly');
-          source = parseGithubSource(payload.source).display;
+          source = sourceOf(payload.source);
         }
         check(activeSignal);
         await prune();

@@ -125,7 +125,7 @@ test('reject wrong format, stale detail revision, unsafe sources and silent sour
   for (const payload of [args({ kind: 'flat' }), args({ name: '../demo' }), args({ expectedRevision: 'stale' }), args({ source: 'acme/different' })]) await assert.rejects(f.updater.prepare(payload));
   assert.equal(f.calls.prepare.length, 0);
   const legacy = fixture(t, { tracked: false });
-  for (const source of ['https://evil.example/a/b', 'acme/skills;id', 'https://token@github.com/acme/skills', 'npx skills update', '../local']) await assert.rejects(legacy.updater.prepare(args({ source })));
+  for (const source of ['https://evil.example/a/b', 'acme/skills;id', 'https://token@github.com/acme/skills', 'npx skills update', '../local']) await assert.rejects(legacy.updater.prepare(args({ source })), error => error.status === 400);
   assert.equal(legacy.calls.prepare.length, 0);
 });
 
