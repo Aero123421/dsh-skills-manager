@@ -26,6 +26,9 @@ function server({ entries = [dir('skills'), dir('skills/demo'), blob('skills/dem
     calls.push({ url, options });
     assert.equal(options.redirect, 'error');
     assert.equal(options.credentials, 'omit');
+    assert.equal(options.cache, 'no-store');
+    assert.equal(options.headers['Cache-Control'], 'no-cache');
+    assert.equal(options.headers['Accept-Encoding'], 'identity');
     assert.equal(Object.keys(options.headers).some((key) => /authorization|cookie/i.test(key)), false);
     const intercepted = await intercept?.(url, options);
     if (intercepted) return intercepted;
@@ -89,7 +92,9 @@ test('download fixed commit snapshots and only complete selected bundles', async
   }
   assert.deepEqual(await readdir(join(destination, 'skills/demo/empty')), []);
   assert.equal(rawCalls(s).length, 2);
-  assert.ok(s.calls.some(({ url }) => url === `${API}/commits/v1`));
+  const lookup = new URL(s.calls.find(({ url }) => url.startsWith(`${API}/commits/`)).url);
+  assert.equal(lookup.origin + lookup.pathname, `${API}/commits/v1`);
+  assert.match(lookup.searchParams.get('_dsh_check'), /^[a-f0-9-]{36}$/);
   assert.ok(rawCalls(s).every(({ url }) => url.includes(`/${COMMIT}/`)));
   assert.deepEqual(await readdir(join(destination, 'skills')), ['demo']);
 });
@@ -97,7 +102,20 @@ test('download fixed commit snapshots and only complete selected bundles', async
 test('slash-containing fragment ref is encoded for commit lookup', async (t) => {
   const destination = await fixture(t), s = server();
   await downloadGithubSkills('acme/skills#feature/docs', destination, s);
-  assert.equal(s.calls[1].url, `${API}/commits/feature%2Fdocs`);
+  const url = new URL(s.calls[1].url);
+  assert.equal(url.origin + url.pathname, `${API}/commits/feature%2Fdocs`);
+  assert.ok(url.searchParams.has('_dsh_check'));
+});
+
+test('moving references bypass cached branch resolution but immutable SHA requests remain stable', async t => {
+  const s = server();
+  await downloadGithubSkills('acme/skills#main', await fixture(t), s);
+  await downloadGithubSkills('acme/skills#main', await fixture(t), s);
+  const moving = s.calls.filter(({ url }) => url.startsWith(`${API}/commits/main`));
+  assert.notEqual(moving[0].url, moving[1].url);
+  await downloadGithubSkills(`acme/skills#${COMMIT}`, await fixture(t), s);
+  const pinned = s.calls.find(({ url }) => url.startsWith(`${API}/commits/${COMMIT}`));
+  assert.equal(pinned.url, `${API}/commits/${COMMIT}`);
 });
 
 test('reject symlinks, submodules and special candidate entries before raw requests or copies', async (t) => {
@@ -165,6 +183,21 @@ test('enforce actual streamed file sizes and JSON response byte limits', async (
   const jsonDestination = await fixture(t);
   const oversized = server({ intercept: (url) => url === API ? new Response('x'.repeat(4 * 1024 * 1024 + 1)) : undefined });
   await assert.rejects(downloadGithubSkills('acme/skills', jsonDestination, oversized), /byte limit/);
+});
+
+test('compressed wire lengths do not reject tiny decoded Git blobs, while both sizes remain bounded', async t => {
+  const destination = await fixture(t);
+  const entries = [dir('skills'), dir('skills/demo'), blob('skills/demo/SKILL.md'), blob('skills/demo/tiny.txt', 'x')];
+  const s = server({ entries, intercept: url => url.endsWith('/tiny.txt') ?
+    new Response('x', { headers: { 'Content-Encoding': 'gzip', 'Content-Length': '21' } }) : undefined });
+  await downloadGithubSkills('acme/skills', destination, s);
+  assert.equal(await readFile(join(destination, 'skills/demo/tiny.txt'), 'utf8'), 'x');
+  const huge = server({ entries, intercept: url => url.endsWith('/tiny.txt') ?
+    new Response('x', { headers: { 'Content-Encoding': 'gzip', 'Content-Length': '99999999' } }) : undefined });
+  await assert.rejects(downloadGithubSkills('acme/skills', await fixture(t), huge), /byte limit/);
+  const decodedOverflow = server({ entries, intercept: url => url.endsWith('/tiny.txt') ?
+    new Response('too much', { headers: { 'Content-Encoding': 'gzip', 'Content-Length': '21' } }) : undefined });
+  await assert.rejects(downloadGithubSkills('acme/skills', await fixture(t), decodedOverflow), /byte limit/);
 });
 
 test('refuse redirects, including injected implementations ignoring redirect:error', async (t) => {

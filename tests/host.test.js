@@ -470,6 +470,35 @@ test('read-only tools retain installed contracts, cwd fallback, and exact-kind r
   assert.equal(current.body, skill()); assert.equal(typeof current.revision, 'string');
 });
 
+// All retrieval is deterministic in-process HTTP data; the pinned CLI sees only
+// the verified local snapshot and never contacts a real network or user profile.
+function githubFixture(t, initial = {}) {
+  let content = initial.body ?? skill(), resource = initial.resource ?? 'upstream resource', commit = initial.commit ?? 'a'.repeat(40), calls = 0;
+  t.mock.method(globalThis, 'fetch', async url => {
+    calls++;
+    const api = 'https://api.github.com/repos/acme/skills';
+    if (url === api) return Response.json({ private: false, default_branch: 'main' });
+    if (new URL(url).origin + new URL(url).pathname === `${api}/commits/main`) return Response.json({ sha: commit, commit: { tree: { sha: 'b'.repeat(40) } } });
+    if (url === `${api}/git/trees/${'b'.repeat(40)}?recursive=1`) return Response.json({ truncated: false, tree: [
+      { path: 'demo', type: 'tree', mode: '040000' },
+      { path: 'demo/SKILL.md', type: 'blob', mode: '100644', size: Buffer.byteLength(content) },
+      { path: 'demo/resource.txt', type: 'blob', mode: '100644', size: Buffer.byteLength(resource) },
+    ] });
+    const prefix = `https://raw.githubusercontent.com/acme/skills/${commit}/demo/`;
+    if (url === `${prefix}SKILL.md`) return new Response(content);
+    if (url === `${prefix}resource.txt`) return new Response(resource);
+    throw new Error(`unexpected external request: ${url}`);
+  });
+  return { change(next = {}) { content = next.body ?? content; resource = next.resource ?? resource; commit = next.commit ?? commit; }, calls: () => calls };
+}
+async function remoteInstall(f) {
+  const prepared = await f.call('prepareRemote', { input: 'npx skills add acme/skills' });
+  assert.equal(prepared.status, 200, JSON.stringify(prepared));
+  const installed = await f.call('installRemote', { token: prepared.value.token, skillNames: ['demo'] });
+  assert.equal(installed.status, 200, JSON.stringify(installed)); assert.equal(installed.value.installed, true);
+  return get(f);
+}
+
 test('remote routes respect operator disable and user write gates before retrieval', async t => {
   const disabled = await fixture(t, { allowRemoteInstall: false });
   for (const method of ['prepareRemote', 'installRemote', 'discardRemote']) {
@@ -480,4 +509,146 @@ test('remote routes respect operator disable and user write gates before retriev
   await create(disabled);
   const readOnly = await fixture(t, { allowUserWrite: false });
   assert.equal((await readOnly.call('prepareRemote', { scope: 'user', input: 'npx skills add owner/repo' })).status, 403);
+});
+
+test('trusted GitHub installs record full final provenance; local saves preserve the baseline and flat metadata stays unsupported', async t => {
+  const f = await fixture(t); githubFixture(t);
+  const current = await remoteInstall(f);
+  assert.equal(current.update.supported, true);
+  assert.equal(current.update.origin.source, 'https://github.com/acme/skills');
+  assert.equal(current.update.origin.commit, 'a'.repeat(40));
+  assert.equal(current.update.origin.baselineHash, current.update.treeHash);
+  assert.match(current.update.originRevision, /^[a-f0-9]{64}$/);
+  assert.equal(current.manifest, undefined);
+  assert.equal((await f.call('setInvocation', { ...identity(current), modelInvocable: false })).status, 200);
+  const dirty = await get(f);
+  assert.equal(dirty.update.originRevision, current.update.originRevision);
+  assert.equal(dirty.update.origin.baselineHash, current.update.treeHash);
+  assert.notEqual(dirty.update.treeHash, current.update.treeHash);
+  await writeFile(join(f.root, 'demo.md'), skill());
+  assert.equal((await get(f, 'demo', 'flat')).update.supported, false);
+  assert.equal((await f.call('prepareUpdate', { name: 'demo', kind: 'flat', source: 'acme/skills' })).status, 400);
+  assert.equal((await f.call('remove', identity(dirty))).status, 200);
+  await assert.rejects(stat(join(dirname(f.root), 'skills-manager', 'demo', 'origin.json')), { code: 'ENOENT' });
+  assert.equal((await get(f, 'demo', 'flat')).body, skill());
+});
+
+test('whole-tree update CAS rejects unseen resource edits even with force and successful replacement preserves complete backup', async t => {
+  const f = await fixture(t), github = githubFixture(t);
+  const current = await remoteInstall(f);
+  github.change({ resource: 'new upstream resource', commit: 'c'.repeat(40) });
+  const request = { name: 'demo', kind: 'dir', expectedRevision: current.revision };
+  const prepared = await f.call('prepareUpdate', request);
+  assert.equal(prepared.status, 200, JSON.stringify(prepared)); assert.equal(prepared.value.requiresOverwrite, false);
+  assert.equal(prepared.value.summary.modified, 1);
+  await writeFile(join(f.root, 'demo', 'resource.txt'), 'unseen local resource edit');
+  assert.equal((await get(f)).revision, current.revision);
+  const stale = await f.call('applyUpdate', { name: 'demo', kind: 'dir', token: prepared.value.token, allowLocalChanges: true });
+  assert.equal(stale.status, 409, JSON.stringify(stale));
+  assert.equal(await readFile(join(f.root, 'demo', 'resource.txt'), 'utf8'), 'unseen local resource edit');
+  const dirty = await f.call('prepareUpdate', request);
+  assert.equal(dirty.status, 200, JSON.stringify(dirty)); assert.equal(dirty.value.requiresOverwrite, true);
+  const apply = { name: 'demo', kind: 'dir', token: dirty.value.token };
+  assert.equal((await f.call('applyUpdate', apply)).status, 409);
+  await writeFile(join(f.root, 'demo.md'), skill() + 'flat remains');
+  const updated = await f.call('applyUpdate', { ...apply, allowLocalChanges: true });
+  assert.equal(updated.status, 200, JSON.stringify(updated)); assert.equal(updated.value.updated, true);
+  assert.equal(await readFile(join(updated.value.backup.path, 'tree', 'resource.txt'), 'utf8'), 'unseen local resource edit');
+  assert.equal(JSON.parse(await readFile(join(updated.value.backup.path, 'origin.json'), 'utf8')).baselineHash, current.update.treeHash);
+  assert.equal(await readFile(join(f.root, 'demo', 'resource.txt'), 'utf8'), 'new upstream resource');
+  assert.equal((await get(f, 'demo', 'flat')).body, skill() + 'flat remains');
+  const final = await get(f);
+  assert.equal(final.update.origin.baselineHash, final.update.treeHash); assert.equal(final.update.origin.commit, 'c'.repeat(40));
+});
+
+test('local HTTP imports cannot forge provenance and clear stale directory associations', async t => {
+  const f = await fixture(t); githubFixture(t); await remoteInstall(f);
+  await rm(join(f.root, 'demo'), { recursive: true }); // Simulate a local-owner manual deletion.
+  const source = join(f.base, 'local'); await mkdir(source); await writeFile(join(source, 'SKILL.md'), skill());
+  const installed = await f.call('install', { srcDir: source, source: 'acme/forged', commit: 'f'.repeat(40), originProof: { source: 'acme/forged', commit: 'f'.repeat(40) } });
+  assert.equal(installed.status, 200, JSON.stringify(installed));
+  const current = await get(f); assert.equal(current.update.origin, null); assert.equal(current.update.originRevision, null);
+});
+
+test('fresh directory creation clears stale GitHub provenance instead of inheriting a deleted installation', async t => {
+  const f = await fixture(t); githubFixture(t); await remoteInstall(f);
+  await rm(join(f.root, 'demo'), { recursive: true });
+  await create(f, { body: skill() + 'freshly authored locally' });
+  const current = await get(f);
+  assert.equal(current.update.origin, null); assert.equal(current.update.originRevision, null);
+  await assert.rejects(stat(join(dirname(f.root), 'skills-manager', 'demo', 'origin.json')), { code: 'ENOENT' });
+});
+
+test('unsafe resources or malformed provenance explicitly disable updates without blocking v0.4 body repair and removal', async t => {
+  const f = await fixture(t); await create(f);
+  const huge = join(f.root, 'demo', 'huge'); await writeFile(huge, ''); await truncate(huge, 32 * 1024 * 1024 + 1);
+  const oversized = await get(f);
+  assert.equal(oversized.body, skill()); assert.equal(oversized.update.supported, false); assert.match(oversized.update.error, /too large/);
+  assert.equal((await f.call('save', { mode: 'update', ...identity(oversized), body: skill() + 'repair' })).status, 200);
+  await rm(huge);
+  const directory = join(dirname(f.root), 'skills-manager', 'demo'); await mkdir(directory, { recursive: true }); await writeFile(join(directory, 'origin.json'), '{bad');
+  const malformed = await get(f);
+  assert.equal(malformed.update.supported, false); assert.match(malformed.update.error, /malformed/);
+  const blocked = await f.call('prepareUpdate', { name: 'demo', kind: 'dir', expectedRevision: malformed.revision, source: 'acme/skills' });
+  assert.equal(blocked.status, 409, JSON.stringify(blocked));
+  assert.equal((await f.call('remove', identity(malformed))).status, 200);
+  await assert.rejects(stat(join(directory, 'origin.json')), { code: 'ENOENT' });
+});
+
+test('identical legacy source registration only writes provenance and leaves installed files untouched', async t => {
+  const f = await fixture(t); githubFixture(t);
+  const source = join(f.base, 'local'); await mkdir(source); await writeFile(join(source, 'SKILL.md'), skill()); await writeFile(join(source, 'resource.txt'), 'upstream resource');
+  assert.equal((await f.call('install', { srcDir: source })).status, 200);
+  const current = await get(f), before = await stat(join(f.root, 'demo', 'SKILL.md'));
+  const prepared = await f.call('prepareUpdate', { name: 'demo', kind: 'dir', source: 'acme/skills', expectedRevision: current.revision });
+  assert.equal(prepared.status, 200, JSON.stringify(prepared)); assert.equal(prepared.value.hasChanges, false); assert.equal(prepared.value.requiresOverwrite, false);
+  const updated = await f.call('applyUpdate', { name: 'demo', kind: 'dir', token: prepared.value.token });
+  assert.equal(updated.status, 200, JSON.stringify(updated)); assert.equal(updated.value.backup, null);
+  const after = await stat(join(f.root, 'demo', 'SKILL.md')); assert.equal(after.ino, before.ino); assert.equal(after.mtimeMs, before.mtimeMs);
+  assert.equal((await get(f)).update.origin.baselineHash, current.update.treeHash);
+});
+
+test('origin-only changes invalidate update previews even when body and resources are unchanged', async t => {
+  const f = await fixture(t), github = githubFixture(t), current = await remoteInstall(f);
+  github.change({ resource: 'new resource', commit: 'c'.repeat(40) });
+  const preview = await f.call('prepareUpdate', { name: 'demo', kind: 'dir', expectedRevision: current.revision });
+  assert.equal(preview.status, 200, JSON.stringify(preview));
+  const originPath = join(dirname(f.root), 'skills-manager', 'demo', 'origin.json');
+  await writeFile(originPath, JSON.stringify({ ...current.update.origin, commit: 'e'.repeat(40) }));
+  const result = await f.call('applyUpdate', { name: 'demo', kind: 'dir', token: preview.value.token, allowLocalChanges: true });
+  assert.equal(result.status, 409, JSON.stringify(result));
+  assert.equal(await readFile(join(f.root, 'demo', 'resource.txt'), 'utf8'), 'upstream resource');
+  assert.equal((await get(f)).update.origin.commit, 'e'.repeat(40));
+});
+
+test('root listing and name reads recover moved originals under the shared lock and readonly roots block rather than hiding skills', async t => {
+  const f = await fixture(t, { allowUserWrite: false }), candidate = await fixture(t), alternate = await fixture(t);
+  await create(f); await create(candidate, { body: skill() + 'candidate' });
+  const current = await get(f), next = await get(candidate), id = '12345678-1234-4234-8234-123456789abc';
+  const directory = join(dirname(f.root), 'skills-manager', 'demo'), backup = join(directory, 'backups', id), stage = join(directory, `stage-${id}`);
+  await mkdir(backup, { recursive: true }); await fs.cp(join(candidate.root, 'demo'), stage, { recursive: true });
+  await writeFile(join(backup, 'origin.json'), 'null');
+  await writeFile(join(directory, 'journal.json'), JSON.stringify({ schema: 1, name: 'demo', id, oldHash: current.update.treeHash, newHash: next.update.treeHash, oldOrigin: null,
+    newOrigin: { schema: 1, name: 'demo', kind: 'dir', source: 'https://github.com/acme/skills', commit: 'a'.repeat(40), baselineHash: next.update.treeHash, updatedAt: '2026-01-01T00:00:00.000Z' } }));
+  await fs.rename(join(f.root, 'demo'), join(backup, 'tree'));
+  setHome(t, dirname(f.root));
+  assert.equal((await f.call('list')).status, 403);
+  assert.equal((await f.call('get', { name: 'demo', kind: 'dir' })).status, 403);
+  assert.equal(await readFile(join(backup, 'tree', 'SKILL.md'), 'utf8'), skill());
+  const recovered = await alternate.call('list', { projectRoot: f.projectRoot });
+  assert.equal(recovered.status, 200, JSON.stringify(recovered)); assert.equal(recovered.value.skills[0].name, 'demo');
+  assert.equal((await get(f)).body, skill()); assert.equal((await get(f)).update.origin, null);
+  await assert.rejects(stat(join(directory, 'journal.json')), { code: 'ENOENT' });
+});
+
+test('apply rechecks actual-root readonly policy after preview while bounded read metadata remains available', async t => {
+  const f = await fixture(t, { allowUserWrite: false }), github = githubFixture(t);
+  const current = await remoteInstall(f); github.change({ resource: 'next', commit: 'd'.repeat(40) });
+  const prepared = await f.call('prepareUpdate', { name: 'demo', kind: 'dir', expectedRevision: current.revision });
+  assert.equal(prepared.status, 200, JSON.stringify(prepared));
+  setHome(t, dirname(f.root));
+  assert.equal((await get(f)).update.origin.commit, 'a'.repeat(40));
+  const updated = await f.call('applyUpdate', { name: 'demo', kind: 'dir', token: prepared.value.token, allowLocalChanges: true });
+  assert.equal(updated.status, 403, JSON.stringify(updated));
+  assert.equal(await readFile(join(f.root, 'demo', 'resource.txt'), 'utf8'), 'upstream resource');
 });

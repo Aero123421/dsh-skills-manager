@@ -650,3 +650,370 @@ test('refresh glyph has two balanced tangent arcs, monochrome 1.5 stroke, and na
   assert.match(css, /height:32px/);
   assert.match(css, /dsm-icon-button\{padding:0;width:32px/);
 });
+
+const updateOrigin = { source: 'https://github.com/owner/repo', commit: '111111111111abcdef',
+  baselineHash: 'baseline', updatedAt: 100 };
+const updateSkill = (overrides = {}) => ({ ...skill(),
+  update: { supported: true, origin: updateOrigin, treeHash: 'tree1', originRevision: 'origin1' }, ...overrides });
+const updatePreview = (overrides = {}) => ({ token: 'update-token', name: 'alpha', kind: 'dir', scope: 'user',
+  root: '/skills', source: updateOrigin.source, currentCommit: updateOrigin.commit, latestCommit: '222222222222abcdef',
+  localDirty: false, untracked: false, upstreamChanged: true, hasChanges: true, canApply: true,
+  requiresOverwrite: false, status: 'available', expiresAt: Date.now() + 600000,
+  summary: { added: 1, modified: 1, removed: 1, total: 3 },
+  files: [{ path: 'new.txt', status: 'added' }, { path: 'SKILL.md', status: 'modified' }, { path: 'old.txt', status: 'removed' }],
+  filesTruncated: false, diff: { text: '@@ instructions @@\n-Old\n+New', truncated: false },
+  revision: 'r1', treeHash: 'tree1', ...overrides });
+const updateResult = (overrides = {}) => ({ updated: true, name: 'alpha', kind: 'dir', root: '/skills',
+  scope: 'user', revision: 'r2', treeHash: 'tree2', origin: { ...updateOrigin, commit: '222222222222abcdef' },
+  backup: { id: 'backup1', path: '/backups/alpha/backup1' }, ...overrides });
+const updateInput = app => app.one(node => node.type === 'input' && node.props['aria-label'] === 'updateSource');
+const updateTrust = app => choice(app, 'updateTrust');
+const updateModal = app => app.one(node => node.type?.name === 'Modal' && node.props.title === 'githubUpdate');
+async function beginUpdate(app, item = updateSkill()) {
+  await openSkill(app, item);
+  app.click(app.button('githubUpdate'));
+}
+async function checkUpdate(app, value = updatePreview()) {
+  app.change(updateTrust(app), true);
+  app.click(app.button('updateCheck'));
+  await app.reply('prepareUpdate', value);
+}
+
+test('GitHub update is explicit and supported directory-only, never available in an editor', async () => {
+  for (const item of [skill(), updateSkill({ kind: 'flat' }), updateSkill({ update: { supported: false } })]) {
+    const app = harness();
+    await openSkill(app, item);
+    assert.equal(app.all(node => node.props.children.includes('githubUpdate')).length, 0);
+  }
+  const app = harness();
+  await openSkill(app, updateSkill());
+  const detached = app.button('githubUpdate');
+  assert.equal(detached.props.icon, 'download');
+  app.click(app.button('edit'));
+  app.change(textarea(app), skill().body + '\nDraft');
+  app.click(detached);
+  assert.equal(app.all(node => node.type?.name === 'Modal').length, 0);
+  assert.match(textarea(app).props.value, /Draft/);
+  assert.equal(app.all(node => node.props.children.includes('githubUpdate')).length, 0);
+});
+
+test('untracked GitHub source is never guessed, rejects commands, and requires explicit renewed trust', async () => {
+  const app = harness();
+  await beginUpdate(app, updateSkill({ update: { supported: true, origin: null } }));
+  assert.equal(updateInput(app).props.value, '');
+  assert.equal(updateInput(app).props.readOnly, false);
+  assert.equal(updateTrust(app).props.checked, false);
+  assert.match(textOf(updateModal(app)), /updateUntracked/);
+  assert.equal(app.button('updateCheck').props.disabled, true);
+  app.change(updateInput(app), 'npx skills add owner/repo');
+  app.click(app.button('updateCheck'));
+  assert.equal(app.requests.filter(r => r.method === 'prepareUpdate').length, 0);
+  app.change(updateTrust(app), true);
+  app.click(app.button('updateCheck'));
+  assert.match(textOf(updateModal(app)), /updateInvalidSource/);
+  assert.equal(app.requests.filter(r => r.method === 'prepareUpdate').length, 0);
+  for (const invalid of ['https://evil.test/owner/repo', 'https://github.com/owner/repo/issues', 'owner/repo; rm -rf /']) {
+    app.change(updateInput(app), invalid);
+    app.change(updateTrust(app), true);
+    app.click(app.button('updateCheck'));
+    assert.equal(app.requests.filter(r => r.method === 'prepareUpdate').length, 0);
+  }
+  app.change(updateInput(app), '  owner/repo  ');
+  assert.equal(updateTrust(app).props.checked, false);
+  app.change(updateTrust(app), true);
+  app.click(app.button('updateCheck'));
+  assert.deepEqual(app.request('prepareUpdate').payload,
+    { scope: 'user', name: 'alpha', kind: 'dir', expectedRevision: 'r1', source: 'owner/repo' });
+  await app.reply('prepareUpdate', updatePreview({ untracked: true, currentCommit: null }));
+  assert.equal(app.all(node => node.type === 'input' && node.props.type === 'checkbox').length, 1,
+    'no selection or overwrite checkbox when not required');
+  app.change(updateInput(app), 'https://github.com/other/repo/tree/main/skills');
+  assert.deepEqual(app.request('discardUpdate').payload, { scope: 'user', token: 'update-token' });
+  assert.equal(updateTrust(app).props.checked, false);
+  assert.equal(app.all(node => node.props.children.includes('updateApply')).length, 0);
+  app.change(updateTrust(app), true);
+  app.click(app.button('updateCheck'));
+  assert.equal(app.request('prepareUpdate').payload.source, 'https://github.com/other/repo/tree/main/skills');
+});
+
+test('tracked updates bind immutable scope/root/identity and never include or edit tracked source', async () => {
+  const app = harness({ storage: new Map([['dsh-skills-manager:projectRoot', '/project/A']]) });
+  await app.reply('list', list());
+  const detachedScope = app.button('user');
+  app.click(app.button('project'));
+  await app.reply('list', list([updateSkill()], '/project/A/.dsh/skills'));
+  app.click(card(app));
+  await app.reply('get', updateSkill());
+  const detachedEdit = app.button('edit');
+  app.click(app.button('githubUpdate'));
+  assert.equal(updateInput(app).props.readOnly, true);
+  app.change(updateInput(app), 'evil/repo');
+  assert.equal(updateInput(app).props.value, updateOrigin.source);
+  assert.match(textOf(updateModal(app)), /111111111111/);
+  app.change(updateTrust(app), true);
+  app.click(app.button('updateCheck'));
+  assert.deepEqual(app.request('prepareUpdate').payload,
+    { scope: 'project', projectRoot: '/project/A', name: 'alpha', kind: 'dir', expectedRevision: 'r1' });
+  assert.equal(back(app).props.disabled, true);
+  assert.equal(updateInput(app).props.disabled, true);
+  assert.equal(updateTrust(app).props.disabled, true);
+  assert.equal(updateModal(app).props.busy, true);
+  app.click(detachedScope);
+  app.click(detachedEdit);
+  app.click(back(app));
+  updateModal(app).props.close();
+  app.change(updateInput(app), 'other/repo');
+  assert.equal(app.requests.filter(r => r.method === 'list').length, 2);
+  assert.equal(app.all(node => node.type === 'textarea').length, 0);
+  await app.reply('prepareUpdate', updatePreview({ scope: 'project', root: '/project/A/.dsh/skills' }));
+  app.click(app.button('updateApply'));
+  assert.deepEqual(app.request('applyUpdate').payload,
+    { scope: 'project', projectRoot: '/project/A', token: 'update-token', name: 'alpha', kind: 'dir', allowLocalChanges: false });
+  assert.equal(app.button('close').props.disabled, true);
+  await app.reply('applyUpdate', updateResult({ scope: 'project', root: '/project/A/.dsh/skills' }));
+  assert.deepEqual(app.request('get').payload, { scope: 'project', projectRoot: '/project/A', name: 'alpha', kind: 'dir' });
+  await app.reply('get', updateSkill({ revision: 'r2', body: 'New instructions' }));
+  assert.deepEqual(app.request('list').payload, { scope: 'project', projectRoot: '/project/A' });
+  await app.reply('list', list([updateSkill({ revision: 'r2' })], '/project/A/.dsh/skills'));
+  assert.match(textOf(updateModal(app)), /updateDone/);
+  assert.match(textOf(updateModal(app)), /updateBackup.*\/backups\/alpha\/backup1/);
+  assert.match(textOf(app.tree()), /New instructions/);
+  assert.equal(app.all(node => node.props.children.includes('updateApply')).length, 0);
+  assert.equal(app.requests.filter(r => r.method === 'discardUpdate').length, 0, 'apply consumes token');
+  app.click(app.button('close'));
+  app.click(app.one(node => node.props.role === 'switch'));
+  assert.equal(app.request('setInvocation').payload.expectedRevision, 'r2');
+});
+
+test('local dirty overwrite is a second unchecked explicit consent, enforced even by detached callbacks', async () => {
+  const app = harness();
+  await beginUpdate(app);
+  await checkUpdate(app, updatePreview({ localDirty: true, requiresOverwrite: true }));
+  assert.match(textOf(updateModal(app)), /updateDirty/);
+  const overwrite = choice(app, 'updateOverwrite');
+  assert.equal(overwrite.props.checked, false);
+  assert.equal(app.button('updateApply').props.disabled, true);
+  app.click(app.button('updateApply'));
+  assert.equal(app.requests.filter(r => r.method === 'applyUpdate').length, 0);
+  app.change(overwrite, true);
+  assert.equal(app.button('updateApply').props.disabled, false);
+  app.click(app.button('updateApply'));
+  assert.equal(app.request('applyUpdate').payload.allowLocalChanges, true);
+  app.change(overwrite, false);
+  await app.reply('applyUpdate', null, { status: 409, error: 'Bundle changed since preview' });
+  assert.match(textOf(updateModal(app)), /Bundle changed since preview/);
+  assert.equal(app.all(node => node.props.children.includes('updateApply')).length, 0);
+  assert.match(textOf(app.tree()), /Original instructions/);
+  app.change(overwrite, true);
+  app.click(app.button('updateCheck'));
+  await app.reply('prepareUpdate', updatePreview({ token: 'fresh-token', localDirty: true, requiresOverwrite: true }));
+  assert.equal(choice(app, 'updateOverwrite').props.checked, false);
+  assert.equal(app.requests.filter(r => r.method === 'applyUpdate').length, 1);
+});
+
+test('upToDate with local edits explains preservation and cannot apply or retain a server-cleaned token', async () => {
+  const app = harness();
+  await beginUpdate(app);
+  await checkUpdate(app, updatePreview({ token: null, status: 'upToDate', canApply: false, expiresAt: null,
+    localDirty: true, upstreamChanged: false, hasChanges: false }));
+  assert.match(textOf(updateModal(app)), /updateDirty.*updateUpToDate/);
+  assert.equal(app.all(node => node.props.children.includes('updateApply')).length, 0);
+  assert.equal(app.all(node => node.props['aria-label'] === 'updateOverwrite').length, 0);
+  app.click(app.button('close'));
+  assert.equal(app.requests.filter(r => r.method === 'applyUpdate' || r.method === 'discardUpdate').length, 0);
+  assert.match(client, /Nothing will be overwritten; local edits are preserved/);
+});
+
+test('update diff and changed paths are escaped text with bounded keyboard-scroll regions and truncation notices', async () => {
+  const app = harness();
+  await beginUpdate(app);
+  const attack = '<img src=x onerror=alert(1)><script>bad()</script>';
+  await checkUpdate(app, updatePreview({ files: [{ path: attack, status: 'modified' }],
+    filesTruncated: true, diff: { text: '+ ' + attack, truncated: true } }));
+  const diff = app.one(node => node.type === 'pre' && node.props['aria-label'] === 'updateDiff');
+  assert.deepEqual(diff.props.children, ['+ ' + attack]);
+  assert.equal(diff.props.dangerouslySetInnerHTML, undefined);
+  assert.equal(diff.props.tabIndex, 0);
+  assert.equal(app.one(node => node.props.className === 'dsm-update-files').props.tabIndex, 0);
+  assert.equal(app.all(node => node.type === 'script' || node.type === 'img').length, 0);
+  assert.match(textOf(updateModal(app)), /updateAdded: 1 · updateModified: 1 · updateRemoved: 1 · updateTotal: 3/);
+  assert.match(textOf(updateModal(app)), /updateFilesTruncated/);
+  assert.match(textOf(updateModal(app)), /updateDiffTruncated/);
+  assert.match(textOf(updateModal(app)), /111111111111/);
+  assert.match(textOf(updateModal(app)), /222222222222/);
+  assert.match(client, /dsm-update-diff\{max-height:280px;overflow:auto/);
+  assert.match(client, /max-height:calc\(100vh - 48px\);overflow:auto/);
+});
+
+test('metadata-only link applies source tracking without claiming instructions changed or a backup', async () => {
+  const app = harness();
+  await beginUpdate(app, updateSkill({ update: { supported: true, origin: null } }));
+  app.change(updateInput(app), 'owner/repo');
+  await checkUpdate(app, updatePreview({ status: 'link', untracked: true, currentCommit: null, hasChanges: false,
+    files: [], diff: { text: '', truncated: false }, summary: { added: 0, modified: 0, removed: 0, total: 0 } }));
+  assert.match(textOf(updateModal(app)), /updateUntracked.*updateLink/);
+  app.click(app.button('updateApply'));
+  await app.reply('applyUpdate', updateResult({ backup: null })); // Preview status is authoritative even without trackingOnly.
+  await app.reply('get', updateSkill({ revision: 'r2' }));
+  await app.reply('list', list([updateSkill({ revision: 'r2' })]));
+  assert.match(textOf(updateModal(app)), /updateTrackingDone/);
+  assert.doesNotMatch(textOf(updateModal(app)), /updateDone|updateBackup/);
+  assert.match(textOf(app.tree()), /Original instructions/);
+});
+
+test('verified successful update warnings are escaped and visible without obscuring status or backup', async () => {
+  const app = harness();
+  await beginUpdate(app);
+  await checkUpdate(app);
+  app.click(app.button('updateApply'));
+  const warning = 'Finalization recovered and commit verified: <script>not HTML</script>';
+  await app.reply('applyUpdate', updateResult({ warning }));
+  await app.reply('get', updateSkill({ revision: 'r2' }));
+  await app.reply('list', list([updateSkill({ revision: 'r2' })]));
+  const result = app.one(node => node.props.role === 'status' && textOf(node).includes('updateDone'));
+  assert.match(textOf(result), /updateDone.*updateBackup.*\/backups\/alpha\/backup1/);
+  const notice = app.one(node => node.props['data-update-warning'] === 'result');
+  assert.deepEqual(notice.props.children, [warning]);
+  assert.equal(notice.props.dangerouslySetInnerHTML, undefined);
+  assert.equal(app.all(node => node.type === 'script' || node.props.role === 'alert').length, 0);
+  assert.equal(app.all(node => node.props.children.includes('updateApply')).length, 0);
+});
+
+test('an unavailable update source shows its error while preserving normal body and editor access', async () => {
+  for (const error of ['Origin unavailable <script>text</script>', { message: 'Unrelated resource is invalid' }]) {
+    const app = harness();
+    await openSkill(app, updateSkill({ update: { supported: false, error } }));
+    const notice = app.one(node => node.props.role === 'alert');
+    assert.match(textOf(notice), /updateUnavailable/);
+    assert.ok(textOf(notice).includes(typeof error === 'string' ? error : error.message));
+    assert.match(textOf(app.tree()), /Original instructions/);
+    assert.equal(app.all(node => node.props.children.includes('githubUpdate')).length, 0);
+    assert.equal(app.all(node => node.type === 'script').length, 0);
+    app.click(app.button('edit'));
+    assert.equal(textarea(app).props.readOnly, false);
+    app.change(textarea(app), skill().body + '\nStill editable');
+    assert.match(textarea(app).props.value, /Still editable/);
+  }
+});
+
+test('unknown apply results never report success and every attempt consumes its token', async () => {
+  for (const result of [null, {}, { updated: true }, updateResult({ name: 'other' }), updateResult({ origin: { source: 'evil/repo' } })]) {
+    const app = harness();
+    await beginUpdate(app);
+    await checkUpdate(app);
+    const apply = app.button('updateApply');
+    app.click(apply);
+    await app.reply('applyUpdate', result);
+    assert.match(textOf(updateModal(app)), /updateMissingResult/);
+    assert.doesNotMatch(textOf(updateModal(app)), /updateDone|updateTrackingDone/);
+    app.click(apply);
+    assert.equal(app.requests.filter(r => r.method === 'applyUpdate').length, 1);
+    assert.equal(app.requests.filter(r => r.method === 'get').length, 1);
+    assert.match(textOf(app.tree()), /Original instructions/);
+  }
+});
+
+test('invalid or retargeted prepare response is not actionable and discards only in captured context', async () => {
+  const app = harness();
+  await beginUpdate(app);
+  await checkUpdate(app, updatePreview({ source: 'https://github.com/evil/repo' }));
+  assert.match(textOf(updateModal(app)), /updateMissingResult/);
+  assert.deepEqual(app.request('discardUpdate').payload, { scope: 'user', token: 'update-token' });
+  assert.equal(app.all(node => node.props.children.includes('updateApply')).length, 0);
+  assert.match(textOf(app.tree()), /Original instructions/);
+});
+
+test('closing, rechecking, trust changes and detail navigation discard exactly once and invalidate detached actions', async () => {
+  const app = harness();
+  await beginUpdate(app);
+  await checkUpdate(app);
+  const oldApply = app.button('updateApply');
+  app.click(app.button('updateCheck'));
+  assert.equal(app.requests.filter(r => r.method === 'discardUpdate').length, 1);
+  await app.reply('prepareUpdate', updatePreview({ token: 'second-token' }));
+  app.click(oldApply);
+  assert.equal(app.requests.filter(r => r.method === 'applyUpdate').length, 0);
+  app.change(updateTrust(app), false);
+  assert.equal(app.requests.filter(r => r.method === 'discardUpdate').length, 2);
+  app.change(updateTrust(app), true);
+  app.click(app.button('updateCheck'));
+  await app.reply('prepareUpdate', updatePreview({ token: 'third-token' }));
+  updateModal(app).props.close();
+  app.render();
+  assert.equal(app.requests.filter(r => r.method === 'discardUpdate').length, 3);
+  assert.equal(app.all(node => node.type?.name === 'Modal').length, 0);
+  app.click(app.button('githubUpdate'));
+  assert.equal(updateTrust(app).props.checked, false);
+  await checkUpdate(app, updatePreview({ token: 'fourth-token' }));
+  app.click(back(app));
+  assert.equal(app.requests.filter(r => r.method === 'discardUpdate').length, 4);
+  assert.equal(app.all(node => node.type?.name === 'Modal').length, 0);
+  app.click(oldApply);
+  assert.equal(app.requests.filter(r => r.method === 'applyUpdate').length, 0);
+});
+
+test('context change discards captured preview without allowing a detached apply to retarget', async () => {
+  const app = harness({ storage: new Map([['dsh-skills-manager:projectRoot', '/project/A']]) });
+  await app.reply('list', list());
+  const project = app.button('project');
+  app.click(card(app));
+  await app.reply('get', updateSkill());
+  app.click(app.button('githubUpdate'));
+  await checkUpdate(app);
+  const apply = app.button('updateApply');
+  app.click(project);
+  assert.deepEqual(app.request('discardUpdate').payload, { scope: 'user', token: 'update-token' });
+  await app.reply('list', list([updateSkill()], '/project/A/.dsh/skills'));
+  app.click(apply);
+  assert.equal(app.requests.filter(r => r.method === 'applyUpdate').length, 0);
+  assert.equal(app.all(node => node.type?.name === 'Modal').length, 0);
+});
+
+test('unmount cleanup is best effort and late update prepare/apply cannot issue any follow-up requests', async () => {
+  const first = harness();
+  await beginUpdate(first);
+  await checkUpdate(first);
+  first.unmount();
+  assert.deepEqual(first.request('discardUpdate').payload, { scope: 'user', token: 'update-token' });
+  first.request('discardUpdate').reject(new Error('Cleanup failed'));
+  await first.flush();
+  assert.equal(first.lateUpdates(), 0);
+  const second = harness();
+  await beginUpdate(second);
+  second.change(updateTrust(second), true);
+  second.click(second.button('updateCheck'));
+  const prepare = second.request('prepareUpdate');
+  second.unmount();
+  assert.equal(prepare.options.signal.aborted, true);
+  const count = second.requests.length;
+  await second.reply('prepareUpdate', updatePreview());
+  assert.equal(second.requests.length, count);
+  assert.equal(second.lateUpdates(), 0);
+  const third = harness();
+  await beginUpdate(third);
+  await checkUpdate(third);
+  third.click(third.button('updateApply'));
+  const apply = third.request('applyUpdate');
+  third.unmount();
+  assert.equal(apply.options.signal.aborted, true);
+  assert.deepEqual(third.request('discardUpdate').payload, { scope: 'user', token: 'update-token' });
+  const applyCount = third.requests.length;
+  await third.reply('applyUpdate', updateResult());
+  assert.equal(third.requests.length, applyCount);
+  assert.equal(third.lateUpdates(), 0);
+});
+
+test('expired update preview is discarded and HTTP check errors preserve detail', async () => {
+  const app = harness();
+  await beginUpdate(app);
+  await checkUpdate(app, updatePreview({ expiresAt: Date.now() - 1 }));
+  app.click(app.button('updateApply'));
+  assert.equal(app.requests.filter(r => r.method === 'applyUpdate').length, 0);
+  assert.match(textOf(updateModal(app)), /updateExpired/);
+  assert.equal(app.request('discardUpdate').payload.token, 'update-token');
+  app.click(app.button('updateCheck'));
+  await app.reply('prepareUpdate', null, { status: 503, error: 'GitHub unavailable' });
+  assert.match(textOf(updateModal(app)), /GitHub unavailable/);
+  assert.match(textOf(app.tree()), /Original instructions/);
+  assert.equal(app.all(node => node.props.children.includes('updateApply')).length, 0);
+});

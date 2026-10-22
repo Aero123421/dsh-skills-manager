@@ -1,11 +1,11 @@
 {
   "name": "dsh-skills-manager",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check index.js && node --check client.js && node --check remote-installer.js && node --check github-source.js && node --test tests/*.test.js"
+    "check": "node --check index.js && node --check client.js && node --check remote-installer.js && node --check github-source.js && node --check github-updater.js && node --check skill-history.js && node --test tests/*.test.js"
   },
-  "description": "Manage Agent Skills (project + user roots) from the DSH sidebar: list, preview, create, edit, delete, enable/disable, validate, install.",
+  "description": "Manage Agent Skills (project + user roots) from the DSH sidebar: list, preview, create, edit, delete, enable/disable, validate, install, and GitHub updates.",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -34,6 +34,8 @@
     "client.js",
     "remote-installer.js",
     "github-source.js",
+    "github-updater.js",
+    "skill-history.js",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",

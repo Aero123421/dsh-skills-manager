@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 — 2026-10-22
+
+- Added **Update from GitHub** in bundle details: explicit trust, commit comparison, changed-file list, bounded instruction diff, confirmation, and complete original-bundle backup.
+- Persist verified GitHub source/commit/full-tree baseline outside scanned skill roots. Legacy v0.4/manual bundles can explicitly register a source; identical registration leaves installed files unchanged.
+- Detect local instruction/resource/empty-directory/Unix execute-bit edits. Replacement requires separate consent, and unseen edits after preview are rejected even with consent.
+- Added same-filesystem staged replacement, bounded persistent backups, validated transaction journals and conservative lazy recovery shared with existing per-name locks. Ambiguous states retain data and stop instead of guessing. Backup retention refuses before mutation rather than deleting originals.
+- Preserve normal body inspection/repair when unsafe resources or malformed provenance disable updates. New local installs and authored bundles clear stale associations; ordinary edits keep the recorded baseline.
+- Report verified recovered commits as success with a visible warning and backup path, not a misleading failed operation.
+- Fixed small compressed GitHub files being rejected by wire/decoded size confusion. Decoded byte limits remain strict; moving-reference lookups avoid reusing GitHub's 60-second CDN cache while all content remains pinned to the resolved SHA.
+- Expanded offline regression coverage and real existing-DSH acceptance with a disposable public GitHub branch advancing through three commits, resource-only conflicts, explicit replacement backups, legacy linking and unchanged-source checks.
+
 ## 0.4.0 — 2026-10-22
 
 - Added a trust-gated **npx skills** install tab: paste restricted `npx skills add` syntax, preview candidates and immutable commit, explicitly select skills, and import into the fixed project/user target.

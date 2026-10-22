@@ -1,5 +1,6 @@
 import { lstat, realpath, readdir, mkdir, open } from 'node:fs/promises';
 import { resolve, join, dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 const MAX_TREE_ENTRIES = 10000;
 const MAX_FILES = 2048;
@@ -83,15 +84,20 @@ async function boundedRequest(url, limit, parentSignal, fetchImpl) {
   try {
     checkAbort(signal);
     response = await abortable(fetchImpl(url, {
-      method: 'GET', redirect: 'error', credentials: 'omit', signal,
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-skills-manager' },
+      method: 'GET', redirect: 'error', credentials: 'omit', cache: 'no-store', signal,
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-skills-manager', 'Cache-Control': 'no-cache', 'Accept-Encoding': 'identity' },
     }), signal);
     // fetch's redirect:error is enforced again for injected implementations.
     if (response.redirected || response.status >= 300 && response.status < 400 ||
         response.url && response.url !== url) invalid('GitHub redirects are not allowed');
     if (!response.ok) invalid(`GitHub request failed (HTTP ${response.status})`);
     const length = response.headers.get('content-length');
-    if (length !== null && (!/^\d+$/.test(length) || Number(length) > limit)) invalid('GitHub response exceeds byte limit');
+    // fetch decodes gzip/br automatically, but Content-Length still describes
+    // the encoded wire bytes. Small gzip bodies can be larger than the Git blob.
+    // Ask for identity above; tolerate bounded coding overhead if a proxy ignores it.
+    const encoding = response.headers.get('content-encoding');
+    const wireLimit = encoding && encoding.trim().toLowerCase() !== 'identity' ? limit + 65536 : limit;
+    if (length !== null && (!/^\d+$/.test(length) || Number(length) > wireLimit)) invalid('GitHub response exceeds byte limit');
     if (!response.body) invalid('Empty GitHub response');
     reader = response.body.getReader();
     const chunks = [];
@@ -129,7 +135,12 @@ export async function downloadGithubSkills(sourceString, destination, { signal, 
   const metadata = await json(api);
   if (metadata?.private !== false) invalid('Only public GitHub repositories are supported');
   const ref = source.ref ?? safeRef(metadata.default_branch);
-  const resolved = await json(`${api}/commits/${encodeURIComponent(ref)}`);
+  // GitHub's public branch endpoint is CDN-cached for 60s even with no-cache
+  // request headers. A fresh query avoids reusing a pre-push branch resolution;
+  // all tree/raw downloads below remain pinned to the returned immutable SHA.
+  const commitURL = new URL(`${api}/commits/${encodeURIComponent(ref)}`);
+  if (!SHA.test(ref)) commitURL.searchParams.set('_dsh_check', randomUUID());
+  const resolved = await json(commitURL.href);
   const commit = resolved?.sha;
   const treeSHA = resolved?.commit?.tree?.sha;
   if (typeof commit !== 'string' || !SHA.test(commit) || typeof treeSHA !== 'string' || !SHA.test(treeSHA)) invalid('Invalid GitHub commit response');

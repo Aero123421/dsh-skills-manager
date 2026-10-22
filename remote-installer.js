@@ -297,7 +297,8 @@ export function createRemoteInstaller({ resolveTarget, validateBody, importSkill
           }
           checkSignal(controller.signal);
           const token = randomUUID(), expiresAt = now() + TTL;
-          const preview = { stage, target, projectRoot: payload.projectRoot, skills, expiresAt, busy: false };
+          const commit = typeof snapshot?.commit === 'string' && /^[a-f0-9]{40}$/i.test(snapshot.commit) ? snapshot.commit : null;
+          const preview = { stage, target, projectRoot: payload.projectRoot, source: parsed.source, commit, skills, expiresAt, busy: false };
           preview.timer = setTimeout(() => {
             if (!preview.busy && previews.get(token) === preview) {
               preview.busy = true;
@@ -331,7 +332,8 @@ export function createRemoteInstaller({ resolveTarget, validateBody, importSkill
           for (const name of payload.skillNames) {
             checkSignal(controller.signal);
             try {
-              const value = await importSkill({ srcDir: preview.skills.get(name).srcDir, scope: target.scope, projectRoot: preview.projectRoot });
+              const proof = preview.commit ? { source: preview.source, commit: preview.commit } : undefined;
+              const value = await importSkill({ srcDir: preview.skills.get(name).srcDir, scope: target.scope, projectRoot: preview.projectRoot }, proof);
               results.push({ name, installed: true, value });
             } catch (error) {
               const detail = { name, message: error.message ?? String(error), status: error.status ?? 500 };
@@ -341,6 +343,30 @@ export function createRemoteInstaller({ resolveTarget, validateBody, importSkill
           return { installed: errors.length === 0, results, errors };
         } finally {
           if (consumed) await remove(payload.token, preview);
+          else preview.busy = false;
+        }
+      });
+    },
+    // Trusted in-process updater hook only: never expose staged paths or callbacks over HTTP.
+    withPrepared(payload, signal, work, { consume = false } = {}) {
+      if (typeof work !== 'function') return Promise.reject(new TypeError('a trusted prepared-snapshot callback is required'));
+      return operate(signal, async controller => {
+        const preview = lookup(payload);
+        let consumed = false;
+        try {
+          if (preview.expiresAt <= now()) { consumed = true; throw fail('preview token expired; prepare again', 410); }
+          const current = await resolveTarget(payload);
+          const target = preview.target;
+          if (current.root !== target.root || current.scope !== target.scope || current.canonical !== target.canonical ||
+              (target.scope === 'project' && payload.projectRoot !== preview.projectRoot)) throw fail('preview target context does not match; prepare again', 409);
+          checkSignal(controller.signal);
+          consumed = consume;
+          await scan(preview.stage, false, controller.signal);
+          return await work({ source: preview.source, commit: preview.commit, skills: preview.skills, expiresAt: preview.expiresAt }, controller.signal);
+        } finally {
+          // Do not turn an already committed store update into an HTTP failure
+          // merely because temporary-file cleanup failed. Owned dirs are retried on dispose.
+          if (consumed) await remove(payload.token, preview).catch(() => {});
           else preview.busy = false;
         }
       });

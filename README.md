@@ -1,6 +1,6 @@
 # dsh-skills-manager
 
-Manage [Agent Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) from the DeepSeek Harness sidebar: list, preview, create, edit, delete, enable/disable, validate, and install — for both **project** (`.dsh/skills`) and **user** (`~/.dsh/skills`) roots.
+Manage [Agent Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) from the DeepSeek Harness sidebar: list, preview, create, edit, delete, enable/disable, validate, install, and update from GitHub — for both **project** (`.dsh/skills`) and **user** (`~/.dsh/skills`) roots.
 
 No build step. Plain Host/Client JavaScript, with pinned `yaml` and official `skills@1.7.4` runtime dependencies. The CLI is used only for an explicitly requested staged installation, never as an arbitrary shell runner.
 
@@ -24,6 +24,13 @@ Actual DSH Web screenshots with temporary test skills (not a mock):
 
 </details>
 
+<details>
+<summary>GitHub update preview</summary>
+
+![Preview changes and apply a backed-up GitHub update](docs/images/github-update-preview.png)
+
+</details>
+
 ## Requirements
 
 - DeepSeek Harness (`dsh`) with a `web`-family profile
@@ -38,7 +45,7 @@ GitHubから直接入れられます（`github:` は `dsh plugin` が受け付�
 dsh plugin --profile web add github:Aero123421/dsh-skills-manager
 
 # バージョンを固定する（再現性が必要な場合に推奨）
-dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.4.0
+dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.5.0
 ```
 
 インストール後に再起動（または HMR リロード）すると、左サイドバーに **SKILLS** が増えます。
@@ -46,7 +53,7 @@ dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.4.0
 会話中のエージェント経由で入れる場合:
 
 > `plugin_manager` で `install_bundle` を呼び、target に
-> `github:Aero123421/dsh-skills-manager`（または `#v0.4.0` 付き）を指定してください。
+> `github:Aero123421/dsh-skills-manager`（または `#v0.5.0` 付き）を指定してください。
 
 ### Update / Uninstall
 
@@ -55,7 +62,7 @@ dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.4.0
 ```sh
 # 更新: いったん外して入れ直し（DSHのgit/tarball更新フロー）
 dsh plugin --profile web remove dsh-skills-manager
-dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.4.0
+dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.5.0
 
 # 削除
 dsh plugin --profile web remove dsh-skills-manager
@@ -93,12 +100,43 @@ https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelin
 
 - **初期対応は `add` と公開GitHubソースのみ**です。`--skill` / `-s` の複数指定、`'*'`、`--copy`、`-y` / `--yes` に対応します。`#ref` でGit参照を指定できます。
 - `-g` / `--global` は画面で **ユーザー** を選んだ場合だけ受け付けます。保存先をコマンドによって勝手に変更しません。
-- `--agent`、`--all`、`--package`、任意のCLIバージョン、`find/update/remove`、GitLab／SSH／private repo、`.git`付きURL、`owner/repo@skill` は未対応で、明示的にエラーにします。CLI全機能の互換を提供するものではありません。
+- `--agent`、`--all`、`--package`、任意のCLIバージョン、CLI入力としての `find/update/remove`、GitLab／SSH／private repo、`.git`付きURL、`owner/repo@skill` は未対応で、明示的にエラーにします。スキル更新には下記の **GitHubから更新** UIを使います。CLI全機能の互換を提供するものではありません。
 - ローカルパスはローカルフォルダタブで指定してください。入力をシェルへ渡すことはなく、`&&`、パイプ、リダイレクト等は拒否します。
 - APIレート制限・巨大／不完全なGitHubツリー・非対応のDSHスキル名・リンクを含むソースは取得できません。ホストのGit／GitHub CLI認証情報を自動利用しません。
 - 候補の有効期限は10分です。変更・閉じる・期限切れで破棄します。複数選択の一部が既存名と衝突した場合、成功と失敗を個別に表示します（バッチ全体のトランザクションではありません）。
 
 公式CLIの書式は [Vercel Labs skills](https://github.com/vercel-labs/skills/blob/main/docs/commands.md#skills-add) を参照してください。本プラグインはDSHの検証・保存先に合わせ、上記のサブセットを提供します。
+
+## GitHubからスキルを更新
+
+1. インストール済みの**フォルダ形式**スキルを開き、**GitHubから更新** を押します。上部の一覧再読込ボタンとは別の操作です。
+2. 取得元を確認して信頼確認にチェックし、**更新を確認** を押します。
+3. 現在／取得先コミット、ファイル・フォルダの追加／変更／削除、`SKILL.md`の差分を確認します。
+4. **更新を適用**。変更前のバンドル全体と取得元情報をバックアップしてから、新しい内容へ置き換えます。
+
+### 取得元とローカル編集
+
+- v0.5.0以降のGitHubインストールは、取得元URL・コミット・バンドル全体の基準ハッシュを記録します。更新時は同じスキル名を同じ取得元から再取得します。`#ref`／tree URLの参照は維持し、固定SHAを勝手に最新ブランチへ変更しません。
+- **v0.4.0以前のインストールや手動配置では取得元が不明**です。最初に `owner/repo` または公開GitHubのリポジトリ／tree URLを入力して確認してください。名前から取得元を推測しません。
+- 既存内容が取得内容と同一なら、ファイルを書き換えず取得元情報だけ登録します（バックアップ不要）。
+- 本文・同梱ファイル・空フォルダ・Unix実行権限にローカル変更があれば、別の **ローカル変更をバックアップ後に置き換える** 確認が必要です。利用設定の変更も本文の編集として扱います。自動マージではなくバンドル全体の置換です。
+- プレビュー後に本文、リソース、取得元情報が変わった場合、上書き確認済みでも409で拒否します。再確認してください。
+- GitHub側の対象ファイルに変更がなければ「上流の更新はありません」と表示し、ローカル編集には触れません。リポジトリ全体のコミットが進んだだけでは、スキル変更と判定しません。
+- 差分や一覧が長い場合は省略を明示します。バイナリ／同梱リソースは変更パス・追加／変更／削除の一覧で確認します。すべてのファイル内容をインライン表示するものではありません。
+
+### 履歴・バックアップと制限
+
+取得元・ジャーナル・バックアップはスキルのスキャン対象外へ保存します。
+
+- プロジェクト: `<projectRoot>/.dsh/skills-manager/<name>/`
+- ユーザー: `$DSH_HOME/skills-manager/<name>/`（未設定なら `~/.dsh/skills-manager/<name>/`）
+- バックアップ: `backups/<UUID>/tree/` に旧バンドル、`origin.json` に旧取得元。旧取得元が未記録ならバックアップ側のJSONは `null` です。
+
+バックアップは自動削除しません。1スキルあたり10件・256MiBを超える更新は元データを動かす前に拒否します。必要なバックアップは退避・整理してください。復元用のGUIボタンは本版にはありません。通常のスキル削除後もバックアップは残します。
+
+置換は同一ファイルシステム上のステージングとジャーナルを使用します。処理中断後は、管理画面の次の一覧／詳細／変更操作で安全に回復できる状態を確認して処理します。曖昧な外部変更があれば元データ・ジャーナルを保持して停止します。読み取り専用のユーザー保存先は勝手に回復書き込みせず、明示的にエラーにします。
+
+これはOSレベルの原子的ディレクトリ交換や、外部プロセスを含む完全なトランザクションではありません。通常のファイルシステム読者には切替途中の短い空白が見える場合があります。更新開始後の接続切断は、適用の取り消しを保証しません。再読込して実際の状態を確認してください。
 
 ## Config
 
@@ -108,7 +146,7 @@ https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelin
 - id: dsh-skills-manager
   config:
     allowUserWrite: true   # false にすると user scope は読み取り専用
-    allowRemoteInstall: true # false にすると npx skills 取得を禁止（ローカル操作は可能）
+    allowRemoteInstall: true # false にすると GitHub取得・更新を禁止（ローカル操作は可能）
     maxBodyBytes: 262144   # 1 skill の最大バイト数
 ```
 
@@ -118,6 +156,8 @@ Host は認証済み `/api` チャネルに exact route を出します（auth +
 
 - `POST /api/dsh-skills-manager/list | get | save | remove | validate | setInvocation | install`
 - リモート追加: `prepareRemote` (`input` → `token/source/commit/skills/expiresAt`)、`installRemote` (`token/skillNames` → スキル別結果)、`discardRemote` (`token`)。各リクエストは `scope` と必要な `projectRoot` を指定します。プレビューtokenは保存先に紐付けられ、実際のインストール試行後に消費されます。
+- GitHub更新: `prepareUpdate` (`name/kind:'dir'/expectedRevision/source?` → コンテキスト付きtoken・コミット・差分)、`applyUpdate` (`token/name/kind/allowLocalChanges`)、`discardUpdate` (`token`)。`source`は取得元未記録の場合だけ明示指定します。
+- `get.update` に更新可否・取得元・バンドル全体の `treeHash`・`originRevision` を返します。不正なリソースや取得元レコードでは更新を無効化して理由を返し、通常の本文確認／修正は可能なままです。ただし未回復・曖昧なトランザクションがある場合はアクセスを停止します。
 - JSON: `{ ok: true, value }` / `{ ok: false, error }`
 - v0.3.0の変更系APIはv0.2.0と互換ではありません。`list` / `get` が返す `kind` (`dir` / `flat`) と `revision` で対象を識別します。
 - `save`: 新規は `mode: 'create'`、更新は `mode: 'update'` + `kind` + `expectedRevision` が必須です。
@@ -160,7 +200,7 @@ description: What this skill does and when to use it.
 
 ## Verification
 
-`npm run check`: **90 tests** cover existing data-integrity/UI regressions plus restricted commands, source/links/paths, safe downloads, token lifecycle, cancellation, subprocess cleanup, partial results and the actual pinned CLI with an offline fixture. The Node tests do not use live GitHub. Real public-source and DSH browser acceptance are documented separately in [verification details](docs/verification.md).
+`npm run check`: **163 tests** cover existing regressions plus verified provenance, complete-tree/origin CAS, preview/overwrite consent, bounded diffs, backups, transaction failure/recovery, committed-with-warning outcomes, stale-source clearing, legacy linking, HTTP compression and fresh branch resolution. Node tests are offline; real public GitHub commit changes and the existing DSH browser are verified separately. See [verification details](docs/verification.md).
 
 [![Check](https://github.com/Aero123421/dsh-skills-manager/actions/workflows/check.yml/badge.svg)](https://github.com/Aero123421/dsh-skills-manager/actions/workflows/check.yml)
 

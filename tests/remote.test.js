@@ -21,7 +21,7 @@ async function skill(directory, name, folder = name) {
   await fs.writeFile(join(directory, folder, 'SKILL.md'), body(name));
 }
 function harness(t, options = {}) {
-  const calls = { downloads: [], runs: [], imports: [], stages: [] };
+  const calls = { downloads: [], runs: [], imports: [], proofs: [], stages: [] };
   let time = 100000, readonly = false;
   const manager = createRemoteInstaller({
     cliEntry: options.pinned ? undefined : fixture,
@@ -46,9 +46,9 @@ function harness(t, options = {}) {
       for (const name of ['alpha', 'beta']) await fs.cp(join(run.args[2], name), join(run.cwd, '.agents', 'skills', name), { recursive: true });
       return { code: 0 };
     },
-    importSkill: async (payload) => {
-      calls.imports.push(payload);
-      return options.importSkill ? options.importSkill(payload) : { installed: true };
+    importSkill: async (payload, proof) => {
+      calls.imports.push(payload); calls.proofs.push(proof);
+      return options.importSkill ? options.importSkill(payload, proof) : { installed: true };
     },
   });
   t.after(() => manager.dispose());
@@ -305,4 +305,45 @@ test('active retrievals are bounded and released after preparation completes', a
   assert.equal(previews[0].commit, 'b'.repeat(40));
   const next = await manager.prepare(request());
   assert.equal(next.skills.length, 2);
+});
+
+test('remote installs pass only staged immutable provenance as a separate trusted argument', async t => {
+  const { manager, calls } = harness(t);
+  const preview = await manager.prepare(request());
+  await manager.install({ ...selected(preview), source: 'https://evil.example/forged', commit: 'z'.repeat(40) });
+  assert.deepEqual(calls.proofs, [{ source: 'https://github.com/owner/repo', commit: 'a'.repeat(40) }]);
+  assert.equal(calls.imports[0].source, undefined); assert.equal(calls.imports[0].commit, undefined);
+});
+
+test('trusted snapshot hook checks context, leases, policy and consumption', async t => {
+  const { manager, calls, readonly } = harness(t);
+  const preview = await manager.prepare(request());
+  const payload = { token: preview.token, scope: 'project', projectRoot };
+  await assert.rejects(manager.withPrepared({ ...payload, projectRoot: resolve('elsewhere') }, undefined, async () => null), error => error.status === 409);
+  const inspected = await manager.withPrepared(payload, undefined, async snapshot => ({ source: snapshot.source, commit: snapshot.commit, name: snapshot.skills.get('alpha').name }));
+  assert.deepEqual(inspected, { source: 'https://github.com/owner/repo', commit: 'a'.repeat(40), name: 'alpha' });
+  let started, release;
+  const ready = new Promise(resolve => { started = resolve; }); const gate = new Promise(resolve => { release = resolve; });
+  const using = manager.withPrepared(payload, undefined, async () => { started(); await gate; return 'done'; });
+  await ready;
+  try { await assert.rejects(manager.discard(payload), error => error.status === 409); }
+  finally { release(); }
+  assert.equal(await using, 'done');
+  readonly();
+  await assert.rejects(manager.withPrepared(payload, undefined, async () => null), error => error.status === 403);
+  await manager.discard(payload); assert.equal(await exists(calls.stages[0]), false);
+});
+
+test('consumed snapshot hooks preserve committed results when temporary cleanup fails', async t => {
+  const { manager, calls } = harness(t); const preview = await manager.prepare(request());
+  const original = fs.rm; let failed = false;
+  fs.rm = async (path, options) => {
+    if (path === calls.stages[0] && !failed) { failed = true; throw Object.assign(new Error('transient cleanup failure'), { code: 'EACCES' }); }
+    return original(path, options);
+  };
+  try {
+    const result = await manager.withPrepared({ token: preview.token, scope: 'project', projectRoot }, undefined, async () => ({ updated: true }), { consume: true });
+    assert.deepEqual(result, { updated: true }); assert.equal(failed, true);
+  } finally { fs.rm = original; }
+  await manager.dispose(); assert.equal(await exists(calls.stages[0]), false);
 });
