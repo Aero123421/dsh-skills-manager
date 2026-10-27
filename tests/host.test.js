@@ -79,6 +79,31 @@ async function assertNoStaging(root) {
   assert.deepEqual(names.filter((name) => name.startsWith('.dsh-skills-')), []);
 }
 
+test('frontmatter delimiters match DSH and reject trailing space or tab', async (t) => {
+  const f = await fixture(t);
+  const valid = '---\nname: demo\ndescription: Test skill\n---\n\nBody\n';
+  assert.equal((await f.call('validate', { body: valid })).value.valid, true);
+  const crlf = '---\r\nname: demo\r\ndescription: Test skill\r\n---\r\n\r\nBody\r\n';
+  assert.equal((await create(f, { body: crlf })).revision.length, 64);
+  assert.equal((await get(f)).body, crlf);
+  for (const body of [
+    '--- \nname: demo\ndescription: Test skill\n---\n\nBody\n',
+    '---\t\nname: demo\ndescription: Test skill\n---\n\nBody\n',
+    '---\nname: spaced\ndescription: Audit fixture\n--- \n\nInstructions.\n',
+    '---\nname: spaced\ndescription: Audit fixture\n---\t\n\nInstructions.\n',
+  ]) {
+    const validated = await f.call('validate', { body });
+    assert.equal(validated.status, 200);
+    assert.equal(validated.value.valid, false, body);
+    assert.match(validated.value.error, /frontmatter/);
+    assert.equal((await f.call('save', { mode: 'create', name: 'spaced', kind: 'flat', body })).status, 400);
+  }
+  await writeFile(join(f.root, 'spaced.md'), '--- \nname: spaced\ndescription: Audit fixture\n---\n\nInstructions.\n');
+  const listed = (await f.call('list')).value.skills.find((item) => item.storageName === 'spaced');
+  assert.equal(listed.valid, false);
+  assert.match(listed.error, /frontmatter/);
+});
+
 test('Config implements the Cordis Standard Schema contract and rejects unsafe limits', () => {
   assert.equal(Config['~standard'].version, 1);
   assert.deepEqual(Config['~standard'].validate(undefined).value, { allowUserWrite: true, allowRemoteInstall: true, maxBodyBytes: 262144 });
