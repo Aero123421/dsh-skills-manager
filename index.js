@@ -1,6 +1,6 @@
 /** Host-side skill operations, exposed through DSH's authenticated exact /api routes. */
 import { homedir } from 'node:os';
-import { join, resolve, basename, parse, isAbsolute, relative, sep } from 'node:path';
+import { join, resolve, basename, dirname, parse, isAbsolute, relative, sep } from 'node:path';
 import { constants } from 'node:fs';
 import fs, { readdir, mkdir, rm, lstat, realpath } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
@@ -52,13 +52,22 @@ function checkName(value) {
   if (typeof value !== 'string' || value.length > 64 || !KEBAB_RE.test(value)) throw fail('invalid skill name (kebab-case, <=64)');
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(value)) throw fail('reserved name on Windows');
 }
-function dirFor(scope, payload) {
+async function dirFor(scope, payload) {
   if (scope === 'user') return join(process.env.DSH_HOME ? resolve(process.env.DSH_HOME) : join(homedir(), '.dsh'), 'skills');
   if (scope !== 'project') throw fail('scope must be project or user');
   const value = typeof payload.projectRoot === 'string' ? payload.projectRoot.trim() : '';
   if (!value || !isAbsolute(value)) throw fail('an absolute projectRoot is required for project scope');
-  const root = resolve(value);
+  let root = resolve(value);
   if (parse(root).root === root || root === homedir()) throw fail('projectRoot must not be a filesystem root or home directory');
+  await noSymlinks(root);
+  // Match DSH filesystem discovery: the nearest accessible .git entry (also a
+  // worktree file) owns project skills; without one, use the requested cwd.
+  for (let current = root; ; current = dirname(current)) {
+    try { await fs.access(join(current, '.git')); root = current; break; }
+    catch { /* DSH also skips missing or inaccessible .git candidates. */ }
+    if (dirname(current) === current) break;
+  }
+  if (parse(root).root === root || root === homedir()) throw fail('resolved projectRoot must not be a filesystem root or home directory');
   return join(root, '.dsh', 'skills');
 }
 async function info(path) {
@@ -282,9 +291,9 @@ export function apply(ctx, input = {}) {
   }
   function scopeOf(payload) { return payload.scope ?? 'project'; }
   async function rootFor(payload, write = false) {
-    const scope = scopeOf(payload), root = dirFor(scope, payload);
+    const scope = scopeOf(payload), root = await dirFor(scope, payload);
     if (write && !config.allowUserWrite) {
-      if (scope === 'user' || await canonicalPath(root) === await canonicalPath(dirFor('user', {}))) throw fail('user writes disabled', 403);
+      if (scope === 'user' || await canonicalPath(root) === await canonicalPath(await dirFor('user', {}))) throw fail('user writes disabled', 403);
     }
     await noSymlinks(root);
     return { root, scope, canonical: await canonicalPath(root) };
@@ -629,13 +638,17 @@ export function apply(ctx, input = {}) {
         parameters: { type: 'object', properties: { ...properties, ...extra }, required, additionalProperties: false },
         output: { schema: { type: 'object' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
         execute: async (args, exec) => {
+          exec?.signal?.throwIfAborted();
           if (!args || typeof args !== 'object' || Array.isArray(args)) throw fail('arguments must be an object');
           const payload = { ...args };
           if (method !== 'validate' && scopeOf(payload) === 'project' && !payload.projectRoot) {
             const directory = scoped.get('workingDirectory');
             if (directory && exec?.agent) payload.projectRoot = await directory.ensure(exec.agent, exec.signal);
           }
-          return handlers[method](payload);
+          exec?.signal?.throwIfAborted();
+          const value = await handlers[method](payload);
+          exec?.signal?.throwIfAborted();
+          return value;
         },
       });
     }

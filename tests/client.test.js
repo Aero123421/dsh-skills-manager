@@ -197,6 +197,19 @@ test('context switches clear old cards/root and ignore late list success and fai
   assert.ok(app.all(node => node.props.role === 'alert' && node.props.children.includes('No access')).length);
 });
 
+test('project list shows resolved storage before create while retaining the entered cwd', async () => {
+  const cwd = '/project/repo/packages/nested', root = '/project/repo/.dsh/skills';
+  const app = harness({ storage: new Map([['dsh-skills-manager:projectRoot', cwd]]) });
+  await app.reply('list', list());
+  app.click(app.button('project'));
+  await app.reply('list', list([], root));
+  assert.equal(app.one(node => node.type === 'input' && node.props['aria-label'] === 'projectPath').props.value, cwd);
+  assert.equal(app.one(node => node.type === 'code' && node.props.title === root).props.children[0], root);
+  assert.equal(app.button('create').props.disabled, false);
+  app.click(app.button('create'));
+  assert.equal(app.all(node => node.type === 'textarea').length, 1);
+});
+
 test('failed refresh removes previous cards and root and gates stale row handlers', async () => {
   const app = harness();
   await app.reply('list', list([skill()], '/old/root'));

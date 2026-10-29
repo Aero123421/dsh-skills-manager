@@ -704,6 +704,8 @@ window.__ModuleLoader__.load({
         h('button', { className: 'dsm-button', type: 'submit', disabled: busy }, t('apply'))) :
           h('div', { className: 'dsm-context' }, h(Icon, { name: 'folder', size: 16 }),
             h('code', { className: 'dsm-path', title: root }, root || t('userHint'))),
+        scope === 'project' && root && h('div', { className: 'dsm-context', 'aria-label': t('location') },
+          h('span', null, t('location')), h('code', { className: 'dsm-path', title: root }, root)),
         message,
         h('div', { className: 'dsm-section-head' },
           h('h2', null, t('installed'), h('span', { className: 'dsm-count' }, skills.length)),

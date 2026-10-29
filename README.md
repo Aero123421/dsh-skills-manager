@@ -73,6 +73,7 @@ dsh plugin --profile web remove dsh-skills-manager
 - 左サイドバーの **SKILLS** から管理画面を開きます。表示言語はDSHの言語設定に追従します（日本語・英語）。
 - **プロジェクト** = `<projectRoot>/.dsh/skills`、**ユーザー** = `$DSH_HOME/skills`（未設定なら `~/.dsh/skills`）。
 - プロジェクトのパスを入力して **開く**。参照ボタンはHostがディレクトリ選択を提供する環境で利用できます。
+- 入力パスは作業ディレクトリとして扱い、DSHと同じく最寄りの `.git` を持つ祖先（worktreeの `.git` ファイルも含む）をプロジェクトルートにします。Git配下でなければ入力先を使います。一覧には解決後の実際の保存先を表示します。旧版でサブディレクトリ直下へ保存したスキルは移動しません。その場所は同じ作業ディレクトリのDSHから検出されないため、必要なものをバックアップしてから、表示された保存先へローカルインストールしてください。
 - 一覧は名前・説明で検索できます。クリックすると手順と保存場所、利用設定を表示します。
 - **新規作成／編集**でfrontmatterと手順を編集し、形式チェック・保存できます。新規作成は既存の同名スキルを上書きせず、更新・切替・削除は読み込んだ版と一致するときだけ実行します。競合（409）の場合は内容を確認し、再読み込みしてください。
 - **エージェントからの利用**は `disable-model-invocation`、**スラッシュコマンド**は `user-invocable` に対応します。未知のmetadataやコメントは保持します。
@@ -208,6 +209,8 @@ description: What this skill does and when to use it.
 
 `npm ci --ignore-scripts` → `npm run check` でHostとClientの回帰テストを実行できます。ビルドは不要です。
 `plugin_manager` の `install_bundle`（target = このディレクトリの絶対パス）で開発用 profile に入れて動作確認できます。
+
+2026-10-29の互換性確認では、公式npm配布のDSH `0.2.1-rc.2`（`latest`）、`0.2.1-rc.4`（`next`）、`0.2.2-alpha.2`（`alpha`）の実サービスを使い、保存→native discovery、ツール出力、キャンセル、アンロード後の登録解除と再ロードを確認しました。ブラウザ・認証・モデル呼び出しの試験ではありません。通常のオフライン回帰は168件成功です。手元に導入済みの公式DSHに対して `DSH_NATIVE_MODULES=/absolute/path/to/node_modules npm run check` を実行すると、追加のnative smokeも実行できます（未指定時はその1件をスキップ）。対象SHAと制限は [verification details](docs/verification.md) を参照してください。
 
 ## License
 
