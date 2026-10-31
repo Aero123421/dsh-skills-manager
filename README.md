@@ -161,6 +161,7 @@ Host は認証済み `/api` チャネルに exact route を出します（auth +
 - `get.update` に更新可否・取得元・バンドル全体の `treeHash`・`originRevision` を返します。不正なリソースや取得元レコードでは更新を無効化して理由を返し、通常の本文確認／修正は可能なままです。ただし未回復・曖昧なトランザクションがある場合はアクセスを停止します。
 - JSON: `{ ok: true, value }` / `{ ok: false, error }`
 - v0.3.0の変更系APIはv0.2.0と互換ではありません。`list` / `get` が返す `kind` (`dir` / `flat`) と `revision` で対象を識別します。
+- 画面は `list` の `root` を以後の操作で `expectedRoot` として送信し、`.git` の追加・削除などで保存先が変わった場合は409で拒否します。直接APIを使う場合も必ず `list` の `root` を `expectedRoot` に設定してください。旧クライアント互換のため省略可能ですが、省略時にこの検査はありません。別プロセスからのファイル操作に対する完全なrace-proof保証ではありません。
 - `save`: 新規は `mode: 'create'`、更新は `mode: 'update'` + `kind` + `expectedRevision` が必須です。
 - `setInvocation` / `remove`: `kind` + `expectedRevision` が必須です。古い版・存在しない更新対象・作成時の同名衝突は409で拒否します。
 - `get`: 同名のフォルダ版・単体版が共存している場合は `kind` を指定してください。曖昧な対象を自動選択しません。

@@ -68,6 +68,15 @@ test('tracked updates preview immutable commits, actual full-tree changes and es
   await assert.rejects(f.updater.apply(applyArgs(preview)), error => error.status === 410);
 });
 
+test('update preview retains the displayed root through staging and publication', async t => {
+  const f = fixture(t), expectedRoot = '/example/project/.dsh/skills';
+  const preview = await f.updater.prepare(args({ expectedRoot }));
+  assert.equal(f.calls.prepare[0].expectedRoot, expectedRoot);
+  await f.updater.apply(applyArgs(preview, { expectedRoot }));
+  assert.equal(f.calls.withPrepared.at(-1).payload.expectedRoot, expectedRoot);
+  assert.equal(f.calls.apply[0].payload.expectedRoot, expectedRoot);
+});
+
 test('up-to-date source leaves locally edited files untouched and frees remote staging', async t => {
   const f = fixture(t, { dirty: true, proposed: tree() });
   const preview = await f.updater.prepare(args());

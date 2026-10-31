@@ -298,7 +298,12 @@ export function apply(ctx, input = {}) {
       if (scope === 'user' || await canonicalPath(root) === await canonicalPath(await dirFor('user', {}))) throw fail('user writes disabled', 403);
     }
     await noSymlinks(root);
-    return { root, scope, canonical: await canonicalPath(root) };
+    const canonical = await canonicalPath(root);
+    if (payload.expectedRoot !== undefined &&
+        (typeof payload.expectedRoot !== 'string' || !isAbsolute(payload.expectedRoot) || resolve(payload.expectedRoot) !== resolve(root))) {
+      throw fail('skill root changed; reload before retrying', 409);
+    }
+    return { root, scope, canonical };
   }
   async function existing(root, payload) {
     const loc = await locate(root, payload.name, payload.kind, true);

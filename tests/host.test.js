@@ -190,6 +190,30 @@ test('legacy nested location is reported and manual copies never move or overwri
   assert.equal((await f.call('list', { scope: 'user' })).value.legacyRoot, null);
 });
 
+test('a changed git root rejects stale edit even when target content matches', async (t) => {
+  const f = await fixture(t), cwd = join(f.projectRoot, 'nested');
+  await mkdir(join(cwd, '.dsh', 'skills', 'demo'), { recursive: true });
+  const original = await create(f);
+  await writeFile(join(cwd, '.dsh', 'skills', 'demo', 'SKILL.md'), skill());
+  await mkdir(join(cwd, '.git'));
+  const base = { projectRoot: cwd, expectedRoot: f.root };
+  for (const [method, payload] of [
+    ['get', { name: 'demo', kind: 'dir' }],
+    ['save', { mode: 'update', ...identity(original), body: skill() + 'changed' }],
+    ['save', { mode: 'create', name: 'new', kind: 'dir', body: skill('new') }],
+    ['setInvocation', { ...identity(original), modelInvocable: false }],
+    ['remove', identity(original)],
+    ['install', { srcDir: join(cwd, '.dsh', 'skills', 'demo') }],
+    ['prepareRemote', { input: 'acme/skills' }],
+    ['prepareUpdate', { name: 'demo', kind: 'dir', expectedRevision: original.revision }],
+  ]) {
+    const result = await f.call(method, { ...base, ...payload });
+    assert.equal(result.status, 409, method);
+  }
+  assert.equal(await readFile(join(cwd, '.dsh', 'skills', 'demo', 'SKILL.md'), 'utf8'), skill());
+  assert.equal(await readFile(join(f.root, 'demo', 'SKILL.md'), 'utf8'), skill());
+});
+
 test('legacy history alone and linked old storage trigger a warning without following links', async (t) => {
   const f = await fixture(t), cwd = join(f.projectRoot, 'nested'), oldRoot = join(cwd, '.dsh', 'skills');
   await mkdir(join(cwd, '.dsh', 'skills-manager'), { recursive: true });

@@ -176,7 +176,7 @@ test('delayed detail blocks project form, scope changes, and targets the origina
   const remove = app.all(node => node.type?.name === 'Button' && node.props.children.includes('delete')).at(-1);
   app.click(remove);
   assert.deepEqual(app.request('remove').payload, {
-    scope: 'project', projectRoot: '/project/A', name: 'same', kind: 'flat', expectedRevision: 'r1',
+    scope: 'project', projectRoot: '/project/A', expectedRoot: '/project/A/.dsh/skills', name: 'same', kind: 'flat', expectedRevision: 'r1',
   });
   await app.reply('remove', {});
   await app.reply('list', list([], '/project/A/.dsh/skills'));
@@ -252,7 +252,7 @@ test('save locks text and navigation, sends update identity, and refreshes revis
   assert.equal(textarea(app).props.value, savedBody);
   await app.reply('validate', { valid: true, frontmatter: { name: 'alpha', description: 'Example' } });
   assert.deepEqual(app.request('save').payload, {
-    scope: 'user', name: 'alpha', kind: 'flat', expectedRevision: 'r1', body: savedBody, mode: 'update',
+    scope: 'user', expectedRoot: '/skills', name: 'alpha', kind: 'flat', expectedRevision: 'r1', body: savedBody, mode: 'update',
   });
   await app.reply('save', { revision: 'r2' });
   await app.reply('get', { ...original, body: savedBody, revision: 'r2' });
@@ -430,7 +430,7 @@ test('install keeps existing scope/project/srcDir contract and locks context whi
   form.props.onSubmit({ preventDefault() {} });
   app.render();
   assert.deepEqual(app.request('install').payload, {
-    scope: 'project', projectRoot: '/project/A', srcDir: '/source/skill',
+    scope: 'project', projectRoot: '/project/A', expectedRoot: '/project/A/.dsh/skills', srcDir: '/source/skill',
   });
   app.click(app.button('user'));
   assert.equal(app.requests.filter(item => item.method === 'list').length, 2);
@@ -481,7 +481,7 @@ test('remote preview requires explicit trust and sends npx syntax without execut
   assert.equal(app.requests.filter(item => item.method === 'prepareRemote').length, 0);
   app.change(remoteTrust(app), true);
   submitInstall(app);
-  assert.deepEqual(app.request('prepareRemote').payload, { scope: 'user', input });
+  assert.deepEqual(app.request('prepareRemote').payload, { scope: 'user', expectedRoot: '/skills', input });
   assert.equal(remoteInput(app).props.disabled, true);
   assert.equal(remoteTrust(app).props.disabled, true);
   assert.equal(app.button('localFolder').props.disabled, true);
@@ -522,7 +522,7 @@ test('editing a remote source invalidates and discards preview and requires rene
   assert.equal(app.requests.filter(item => item.method === 'prepareRemote').length, 1);
   app.change(remoteTrust(app), true);
   submitInstall(app);
-  assert.deepEqual(app.request('prepareRemote').payload, { scope: 'user', input: 'other/repository' });
+  assert.deepEqual(app.request('prepareRemote').payload, { scope: 'user', expectedRoot: '/skills', input: 'other/repository' });
   await app.reply('prepareRemote', preview({ token: 'replacement' }));
   assert.equal(choice(app, 'alpha').props.checked, false);
 });
@@ -534,7 +534,7 @@ test('remote install uses context-bound token and only explicitly selected skill
   await app.reply('list', list([], '/project/A/.dsh/skills'));
   await prepare(app, preview({ scope: 'project', root: '/project/A/.dsh/skills' }));
   assert.deepEqual(app.requests.find(item => item.method === 'prepareRemote').payload,
-    { scope: 'project', projectRoot: '/project/A', input: 'vercel-labs/agent-skills' });
+    { scope: 'project', projectRoot: '/project/A', expectedRoot: '/project/A/.dsh/skills', input: 'vercel-labs/agent-skills' });
   submitInstall(app);
   assert.equal(app.requests.filter(item => item.method === 'installRemote').length, 0);
   app.change(choice(app, 'alpha'), true);
@@ -543,7 +543,7 @@ test('remote install uses context-bound token and only explicitly selected skill
   const oldChoice = choice(app, 'alpha');
   submitInstall(app);
   assert.deepEqual(app.request('installRemote').payload,
-    { scope: 'project', projectRoot: '/project/A', token: 'preview-token', skillNames: ['beta'] });
+    { scope: 'project', projectRoot: '/project/A', expectedRoot: '/project/A/.dsh/skills', token: 'preview-token', skillNames: ['beta'] });
   assert.equal(remoteInput(app).props.disabled, true);
   assert.equal(choice(app, 'beta').props.disabled, true);
   assert.equal(app.one(node => node.type === 'input' && node.props['aria-label'] === 'projectPath').props.disabled, true);
@@ -666,7 +666,7 @@ test('project/global conflict is surfaced as server error instead of silently re
   await app.reply('list', list([], '/project/A/.dsh/skills'));
   beginRemote(app, 'npx skills add owner/repo -g');
   assert.deepEqual(app.request('prepareRemote').payload,
-    { scope: 'project', projectRoot: '/project/A', input: 'npx skills add owner/repo -g' });
+    { scope: 'project', projectRoot: '/project/A', expectedRoot: '/project/A/.dsh/skills', input: 'npx skills add owner/repo -g' });
   await app.reply('prepareRemote', null, { status: 400, error: '-g conflicts with project destination' });
   assert.match(textOf(app.tree()), /-g conflicts with project destination/);
   assert.equal(app.button('project').props['aria-selected'], true);
@@ -806,7 +806,7 @@ test('untracked GitHub source is never guessed, rejects commands, and requires e
   app.change(updateTrust(app), true);
   app.click(app.button('updateCheck'));
   assert.deepEqual(app.request('prepareUpdate').payload,
-    { scope: 'user', name: 'alpha', kind: 'dir', expectedRevision: 'r1', source: 'owner/repo' });
+    { scope: 'user', expectedRoot: '/skills', name: 'alpha', kind: 'dir', expectedRevision: 'r1', source: 'owner/repo' });
   await app.reply('prepareUpdate', updatePreview({ untracked: true, currentCommit: null }));
   assert.equal(app.all(node => node.type === 'input' && node.props.type === 'checkbox').length, 1,
     'no selection or overwrite checkbox when not required');
@@ -836,7 +836,7 @@ test('tracked updates bind immutable scope/root/identity and never include or ed
   app.change(updateTrust(app), true);
   app.click(app.button('updateCheck'));
   assert.deepEqual(app.request('prepareUpdate').payload,
-    { scope: 'project', projectRoot: '/project/A', name: 'alpha', kind: 'dir', expectedRevision: 'r1' });
+    { scope: 'project', projectRoot: '/project/A', expectedRoot: '/project/A/.dsh/skills', name: 'alpha', kind: 'dir', expectedRevision: 'r1' });
   assert.equal(back(app).props.disabled, true);
   assert.equal(updateInput(app).props.disabled, true);
   assert.equal(updateTrust(app).props.disabled, true);
@@ -851,10 +851,10 @@ test('tracked updates bind immutable scope/root/identity and never include or ed
   await app.reply('prepareUpdate', updatePreview({ scope: 'project', root: '/project/A/.dsh/skills' }));
   app.click(app.button('updateApply'));
   assert.deepEqual(app.request('applyUpdate').payload,
-    { scope: 'project', projectRoot: '/project/A', token: 'update-token', name: 'alpha', kind: 'dir', allowLocalChanges: false });
+    { scope: 'project', projectRoot: '/project/A', expectedRoot: '/project/A/.dsh/skills', token: 'update-token', name: 'alpha', kind: 'dir', allowLocalChanges: false });
   assert.equal(app.button('close').props.disabled, true);
   await app.reply('applyUpdate', updateResult({ scope: 'project', root: '/project/A/.dsh/skills' }));
-  assert.deepEqual(app.request('get').payload, { scope: 'project', projectRoot: '/project/A', name: 'alpha', kind: 'dir' });
+  assert.deepEqual(app.request('get').payload, { scope: 'project', projectRoot: '/project/A', expectedRoot: '/project/A/.dsh/skills', name: 'alpha', kind: 'dir' });
   await app.reply('get', updateSkill({ revision: 'r2', body: 'New instructions' }));
   assert.deepEqual(app.request('list').payload, { scope: 'project', projectRoot: '/project/A' });
   await app.reply('list', list([updateSkill({ revision: 'r2' })], '/project/A/.dsh/skills'));

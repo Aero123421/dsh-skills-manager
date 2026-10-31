@@ -175,7 +175,8 @@ window.__ModuleLoader__.load({
         const response = await fetch(url.href, {
           method: 'POST', credentials: 'same-origin', signal: request.controller.signal,
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ...requestContext, ...payload }),
+          body: JSON.stringify({ ...requestContext, ...payload,
+            ...(!['list', 'validate', 'discardRemote', 'discardUpdate'].includes(method) && root ? { expectedRoot: root } : {}) }),
         });
         const value = await response.json().catch(() => null);
         if (!response.ok || !value?.ok) throw new Error(value?.error?.message || `HTTP ${response.status}`);
