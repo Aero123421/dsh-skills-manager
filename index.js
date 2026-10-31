@@ -194,7 +194,9 @@ function toBool(value, fallback) {
   throw fail('invocation field must be a boolean');
 }
 function parseFrontmatter(body) {
-  const match = /^(---[ \t]*\r?\n)([\s\S]*?)(^---[ \t]*(?:\r?\n|$))([\s\S]*)/m.exec(body);
+  // DSH accepts a delimiter only when the line is exactly "---" after one trailing CR.
+  // Spaces or tabs are not delimiters. Multiline `$` also matches a closing "---\r" at EOF.
+  const match = /^(---\r?\n)([\s\S]*?)(^---(?:\r?\n|$))([\s\S]*)/m.exec(body);
   if (!match || match.index !== 0) return { error: 'missing YAML frontmatter (--- ... ---)' };
   try {
     const doc = parseDocument(match[2], { keepSourceTokens: true, uniqueKeys: true });

@@ -112,7 +112,10 @@ window.__ModuleLoader__.load({
       view.current = { context, contextKey, detail, editor, text, baseline, dirty, ready };
 
       function draftKey(item) {
-        return ID + ':draft:' + JSON.stringify([item.context, item.kind, item.storageName || '__new__']);
+        // Canonical root separates user homes that share an origin. Legacy keys
+        // omit it and are never read, so an old draft cannot land in another home.
+        const root = typeof item.root === 'string' ? item.root : '';
+        return ID + ':draft:' + JSON.stringify([item.context, item.kind, item.storageName || '__new__', root]);
       }
       function saveDraft(snapshot = view.current) {
         if (!snapshot?.detail || !snapshot.editor || !snapshot.dirty) return;
@@ -134,7 +137,7 @@ window.__ModuleLoader__.load({
         setText(hasDraft ? draft.text : body);
         setBaseline(hasDraft ? draft.baseline : newSkill ? '' : body);
         setEditor(!!hasDraft || newSkill);
-        if (hasDraft) setNotice({ text: t(draft.revision === item.revision ? 'draftRestored' : 'draftConflict') });
+        if (hasDraft) setNotice({ text: t(draft.revision === item.revision ? 'draftRestored' : 'draftConflict') + (item.root ? '\n' + item.root : '') });
         // Keep the latest snapshot available even before the next React render.
         view.current = { ...view.current, detail: restored, text: hasDraft ? draft.text : body,
           baseline: hasDraft ? draft.baseline : newSkill ? '' : body, editor: !!hasDraft || newSkill,
@@ -243,7 +246,7 @@ window.__ModuleLoader__.load({
           const url = new URL(input);
           const parts = url.pathname.split('/').filter(Boolean);
           return url.protocol === 'https:' && url.hostname === 'github.com' && !url.port &&
-            !url.username && !url.password && !url.search && !url.hash && !/\\s|[\\\\]/.test(input) &&
+            !url.username && !url.password && !url.search && !url.hash && !/[\s\\]/.test(input) &&
             parts.length >= 2 && parts.slice(0, 2).every(p => new RegExp(`^${part}$`).test(p) && p !== '.' && p !== '..') &&
             (parts.length === 2 || parts.length >= 4 && parts[2] === 'tree') &&
             parts.every(p => !['.', '..'].includes(decodeURIComponent(p)));
@@ -508,7 +511,7 @@ window.__ModuleLoader__.load({
         const body = `---\nname: ${name}\ndescription: Describe what this skill does and when to use it.\n---\n\n# My skill\n\nWrite reusable instructions here.\n`;
         setNotice(null);
         restoreEditor({ name: '', kind: 'dir', context: { ...view.current.context },
-          revision: null, isNew: true }, body, true);
+          revision: null, isNew: true, root }, body, true);
       }
       function editText(value) {
         if (runtime.current.busy) return;
@@ -921,6 +924,15 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { en, zh: en }), ID + ':locale');
         ctx.effect(() => ctx.locale.register(NS, 'ja', ja), ID + ':ja');
+        // Dictionaries alone are not selectable. DSH ships en/zh; without this,
+        // a Japanese browser never activates the ja catalog and the panel stays English.
+        ctx.effect(() => {
+          if (typeof ctx.locale.addLanguage !== 'function') return;
+          try { return ctx.locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' }); }
+          catch (error) {
+            if (!/already registered/i.test(String(error?.message || error))) throw error;
+          }
+        }, ID + ':ja-language');
         const t = ctx.locale.bind(NS);
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
           name: 'sidebar.panellist', id: ID, order: 5, label: () => t('panel'), locale: NS,

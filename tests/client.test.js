@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 const client = fs.readFileSync(new URL('../client.js', import.meta.url), 'utf8');
 
-function harness({ baseURI = 'https://example.test/mounted/dsh/', storage = new Map(), picker } = {}) {
+function harness({ baseURI = 'https://example.test/mounted/dsh/', storage = new Map(), picker, locale } = {}) {
   const hooks = [], effects = [], requests = [], listeners = new Map();
   let cursor = 0, changed = true, tree, Panel, mounted = true, lateUpdates = 0;
   const react = {
@@ -40,10 +40,11 @@ function harness({ baseURI = 'https://example.test/mounted/dsh/', storage = new 
       }
     },
   };
+  const pluginEffects = [];
   const ctx = {
     get: () => ({ pickDirectory: picker }),
-    effect() {},
-    locale: { bind: () => value => value },
+    effect(callback) { pluginEffects.push(callback); },
+    locale: locale || { bind: () => value => value },
     slots: {
       inject(_name, callback) { callback(); },
       register(options, component) { if (options.name === 'main') Panel = component; },
@@ -121,7 +122,7 @@ function harness({ baseURI = 'https://example.test/mounted/dsh/', storage = new 
   }
   render();
   return { all, one, button, request, requests, reply, click, change, flush, render, storage,
-    unmount, listeners, lateUpdates: () => lateUpdates, tree: () => tree };
+    unmount, listeners, effects: pluginEffects, lateUpdates: () => lateUpdates, tree: () => tree };
 }
 
 const skill = (name = 'alpha', kind = 'dir', revision = 'r1') => ({
@@ -266,6 +267,61 @@ test('create chooses an unused name and uses create mode rather than update', as
   await app.reply('save', null, { status: 409, error: 'Already exists' });
   assert.equal(textarea(app).props.readOnly, false);
   assert.match(textarea(app).props.value, /name: my-skill-3/);
+});
+
+test('drafts stay on the canonical root and ignore legacy keys from another home', async () => {
+  const storage = new Map();
+  const legacy = 'dsh-skills-manager:draft:' + JSON.stringify([{ scope: 'user' }, 'dir', 'alpha']);
+  storage.set(legacy, JSON.stringify({ text: 'LEGACY PRIVATE', baseline: 'old', revision: 'r1' }));
+  const homeA = '/home/a/.dsh/skills';
+  const homeB = '/home/b/.dsh/skills';
+  const first = harness({ storage });
+  await openSkill(first, { ...skill(), root: homeA });
+  first.click(first.button('edit'));
+  first.change(textarea(first), skill().body + '\nPRIVATE DRAFT FOR HOME A');
+  first.unmount();
+  assert.ok([...storage.keys()].some(key => key.includes(homeA)));
+  assert.equal(storage.has(legacy), true);
+  const second = harness({ storage });
+  await openSkill(second, { ...skill(), root: homeB });
+  assert.equal(second.all(node => node.type === 'textarea').length, 0, 'home B does not open home A draft');
+  assert.equal([...second.storage.keys()].some(key => String(second.storage.get(key)).includes('LEGACY PRIVATE') && key !== legacy), false);
+  const third = harness({ storage });
+  await openSkill(third, { ...skill(), root: homeA });
+  assert.match(textarea(third).props.value, /PRIVATE DRAFT FOR HOME A/);
+  const notice = [].concat(third.all(node => node.props.className === 'dsm-notice')[0].props.children).join('');
+  assert.match(notice, /draftRestored/);
+  assert.match(notice, /\/home\/a\/\.dsh\/skills/);
+});
+
+test('new-skill drafts are keyed by the listed root', async () => {
+  const app = harness();
+  await app.reply('list', list([skill()], '/home/a/.dsh/skills'));
+  app.click(app.button('create'));
+  const keys = [...app.storage.keys()].filter(key => key.includes(':draft:'));
+  assert.equal(keys.length, 1);
+  assert.match(keys[0], /\/home\/a\/\.dsh\/skills/);
+});
+
+test('Japanese is added as a selectable language and a second registration is ignored', () => {
+  const added = [];
+  let calls = 0;
+  const app = harness({ locale: {
+    bind: () => value => value,
+    register() { return () => {}; },
+    addLanguage(input) {
+      calls++;
+      if (calls > 1) throw new Error('locale "ja" is already registered');
+      added.push(input);
+      return () => {};
+    },
+  } });
+  for (const effect of app.effects) effect();
+  for (const effect of app.effects) effect();
+  assert.equal(added.length, 1);
+  assert.equal(added[0].id, 'ja');
+  assert.equal(added[0].label, '日本語');
+  assert.equal(added[0].fallback, 'en');
 });
 
 test('external main-slot unmount preserves context drafts, restores revision, and cancel clears them', async () => {
@@ -725,7 +781,8 @@ test('untracked GitHub source is never guessed, rejects commands, and requires e
   app.click(app.button('updateCheck'));
   assert.match(textOf(updateModal(app)), /updateInvalidSource/);
   assert.equal(app.requests.filter(r => r.method === 'prepareUpdate').length, 0);
-  for (const invalid of ['https://evil.test/owner/repo', 'https://github.com/owner/repo/issues', 'owner/repo; rm -rf /']) {
+  for (const invalid of ['https://evil.test/owner/repo', 'https://github.com/owner/repo/issues', 'owner/repo; rm -rf /',
+    'https://github.com/owner/repo\n/tree/main', 'https://github.com/owner/repo\t/tree/main']) {
     app.change(updateInput(app), invalid);
     app.change(updateTrust(app), true);
     app.click(app.button('updateCheck'));
