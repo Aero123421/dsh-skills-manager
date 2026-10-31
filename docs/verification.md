@@ -1,5 +1,19 @@
 # Verification — 0.5.0
 
+## Integration follow-up
+
+The independent integration clone adds a warning when the selected nested cwd has an old `.dsh/skills` or `.dsh/skills-manager` location. The check does not scan other subdirectories, follow legacy links, move files or migrate provenance, journals or backups. Host tests cover directory and flat manual copies, resources, same-name refusal, original preservation, history-only detection and linked legacy roots; a client test covers the warning and context changes. A reproduced stale-edit case added a `.git` between loading and saving, with an identical same-name skill at both roots: the previous implementation updated the wrong root. The GUI now sends its displayed `expectedRoot` on reads and mutations, and the host rejects a changed root with 409; this is carried through GitHub and remote staging. Older direct API callers that omit this optional field do not receive that protection. Local-owner filesystem races are not eliminated. The native service smoke and offline tests are separate from browser, HTTP authentication and live-provider testing. Earlier records below describe only the versions and commits stated there.
+
+## 2026-10-29 compatibility check
+
+The current local changes were checked against official npm distributions `@deepseek-ai/dsh@0.2.1-rc.2` (`latest`, source `687f282e8625c6b8d11ff58211a90524be2e4317`), `@deepseek-ai/dsh@0.2.1-rc.4` (`next`, source `504a01a9578abc2c6f1fb896b1dc322c9fe24f66`) and `@deepseek-ai/dsh@0.2.2-alpha.2` (`alpha`, source `f3803c96974ad4a94195fb97e5c637e9c2a3afe3`). `npm view @deepseek-ai/dsh dist-tags repository --json` confirmed those tags; these are prereleases, not stable versions. The full check passed 171 tests with the native smoke enabled on each distribution.
+
+`npm run check` passes 168 offline tests; one optional native smoke is skipped without `DSH_NATIVE_MODULES`. Point that variable to an isolated official DSH installation's `node_modules` to also exercise real Cordis, Connection exact-route registration, Tools and Skill filesystem services. The smoke covers nested Git cwd and a `.git` worktree-file fixture, CRLF save and native discovery/load, invocation flags, canonical tool values and rendered content, cancellation, unload cleanup and reload of persisted bytes. It does not start an application, obtain credentials, access a provider or test browser authentication. Its Connection authentication object deliberately throws if accessed; only the real registry and owner Peer are used. The no-Git fallback is covered by an offline fixture because this managed environment supplies `.git` entries on shared temporary ancestors.
+
+Project storage now follows the nearest accessible `.git` ancestor, matching native discovery. The input cwd remains visible alongside the resolved storage path. Existing nested skill files stay in place; they are not migrated. The delimiter, draft-root, update-URL and Japanese-language fixes in [PR #5](https://github.com/Aero123421/dsh-skills-manager/pull/5) were separate and were not included in that historical check. The earlier live acceptance records below describe their original versions and were not rerun as browser tests in this check.
+
+## Earlier 0.5.0 verification
+
 Verified 2026-10-22 on Linux, Node 22.23.4 and the existing installed DSH 0.2.1-rc.2. This retains the v0.3 data-integrity fixes and adds verified, backed-up GitHub skill updates. Happy-path tests alone do not establish transaction safety.
 
 ## Automated regression tests

@@ -333,7 +333,7 @@ export function createRemoteInstaller({ resolveTarget, validateBody, importSkill
             checkSignal(controller.signal);
             try {
               const proof = preview.commit ? { source: preview.source, commit: preview.commit } : undefined;
-              const value = await importSkill({ srcDir: preview.skills.get(name).srcDir, scope: target.scope, projectRoot: preview.projectRoot }, proof);
+              const value = await importSkill({ srcDir: preview.skills.get(name).srcDir, scope: target.scope, projectRoot: preview.projectRoot, expectedRoot: target.root }, proof);
               results.push({ name, installed: true, value });
             } catch (error) {
               const detail = { name, message: error.message ?? String(error), status: error.status ?? 500 };

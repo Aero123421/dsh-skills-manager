@@ -14,7 +14,8 @@ function sourceOf(value) {
   catch (error) { throw fail(error.message, 400); }
 }
 function context(payload) {
-  return { scope: payload.scope ?? 'project', ...(payload.projectRoot !== undefined && { projectRoot: payload.projectRoot }) };
+  return { scope: payload.scope ?? 'project', ...(payload.projectRoot !== undefined && { projectRoot: payload.projectRoot }),
+    ...(payload.expectedRoot !== undefined && { expectedRoot: payload.expectedRoot }) };
 }
 function identity(payload) {
   if (!payload || typeof payload !== 'object' || payload.kind !== 'dir' ||

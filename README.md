@@ -73,6 +73,7 @@ dsh plugin --profile web remove dsh-skills-manager
 - 左サイドバーの **SKILLS** から管理画面を開きます。表示言語はDSHの言語設定に追従します（日本語・英語）。
 - **プロジェクト** = `<projectRoot>/.dsh/skills`、**ユーザー** = `$DSH_HOME/skills`（未設定なら `~/.dsh/skills`）。
 - プロジェクトのパスを入力して **開く**。参照ボタンはHostがディレクトリ選択を提供する環境で利用できます。
+- 入力パスは作業ディレクトリとして扱い、DSHと同じく最寄りの `.git` を持つ祖先（worktreeの `.git` ファイルも含む）をプロジェクトルートにします。Git配下でなければ入力先を使います。一覧には解決後の実際の保存先を表示します。旧版でサブディレクトリ直下へ保存したスキルは移動しません。入力したディレクトリの旧 `.dsh/skills` または隣接する `.dsh/skills-manager` が存在する場合は、一覧に旧パスと手動移行の警告を表示します。他のサブディレクトリは検索しないため、旧版で使った各パスを入力して確認してください。旧データと `.dsh/skills-manager` 内の履歴・取得元情報・ジャーナルをバックアップし、復旧待ちがある場合は旧版で復旧した後、必要なフォルダや `.md` をローカルインストールしてください。同名の保存先は上書きせずエラーになります。取得元情報・バックアップは新しい場所へコピーされず、必要ならGitHub取得元を再登録してください。無効なスキルやリンクの移行は手動確認が必要です。
 - 一覧は名前・説明で検索できます。クリックすると手順と保存場所、利用設定を表示します。
 - **新規作成／編集**でfrontmatterと手順を編集し、形式チェック・保存できます。新規作成は既存の同名スキルを上書きせず、更新・切替・削除は読み込んだ版と一致するときだけ実行します。競合（409）の場合は内容を確認し、再読み込みしてください。
 - **エージェントからの利用**は `disable-model-invocation`、**スラッシュコマンド**は `user-invocable` に対応します。未知のmetadataやコメントは保持します。
@@ -160,6 +161,7 @@ Host は認証済み `/api` チャネルに exact route を出します（auth +
 - `get.update` に更新可否・取得元・バンドル全体の `treeHash`・`originRevision` を返します。不正なリソースや取得元レコードでは更新を無効化して理由を返し、通常の本文確認／修正は可能なままです。ただし未回復・曖昧なトランザクションがある場合はアクセスを停止します。
 - JSON: `{ ok: true, value }` / `{ ok: false, error }`
 - v0.3.0の変更系APIはv0.2.0と互換ではありません。`list` / `get` が返す `kind` (`dir` / `flat`) と `revision` で対象を識別します。
+- 画面は `list` の `root` を以後の操作で `expectedRoot` として送信し、`.git` の追加・削除などで保存先が変わった場合は409で拒否します。直接APIを使う場合も必ず `list` の `root` を `expectedRoot` に設定してください。旧クライアント互換のため省略可能ですが、省略時にこの検査はありません。別プロセスからのファイル操作に対する完全なrace-proof保証ではありません。
 - `save`: 新規は `mode: 'create'`、更新は `mode: 'update'` + `kind` + `expectedRevision` が必須です。
 - `setInvocation` / `remove`: `kind` + `expectedRevision` が必須です。古い版・存在しない更新対象・作成時の同名衝突は409で拒否します。
 - `get`: 同名のフォルダ版・単体版が共存している場合は `kind` を指定してください。曖昧な対象を自動選択しません。
@@ -208,6 +210,8 @@ description: What this skill does and when to use it.
 
 `npm ci --ignore-scripts` → `npm run check` でHostとClientの回帰テストを実行できます。ビルドは不要です。
 `plugin_manager` の `install_bundle`（target = このディレクトリの絶対パス）で開発用 profile に入れて動作確認できます。
+
+2026-10-29の互換性確認では、公式npm配布のDSH `0.2.1-rc.2`（`latest`）、`0.2.1-rc.4`（`next`）、`0.2.2-alpha.2`（`alpha`）の実サービスを使い、保存→native discovery、ツール出力、キャンセル、アンロード後の登録解除と再ロードを確認しました。ブラウザ・認証・モデル呼び出しの試験ではありません。通常のオフライン回帰は168件成功です。手元に導入済みの公式DSHに対して `DSH_NATIVE_MODULES=/absolute/path/to/node_modules npm run check` を実行すると、追加のnative smokeも実行できます（未指定時はその1件をスキップ）。対象SHAと制限は [verification details](docs/verification.md) を参照してください。
 
 ## License
 

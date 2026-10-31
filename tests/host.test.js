@@ -16,7 +16,8 @@ async function fixture(t, config = {}) {
     await rm(base, { recursive: true, force: true });
   });
   const projectRoot = join(base, 'project');
-  await mkdir(projectRoot);
+  // Isolate discovery from any .git supplied on a shared temp ancestor.
+  await mkdir(join(projectRoot, '.git'), { recursive: true });
   const routes = new Map(), tools = new Map(), disposers = [];
   const services = {
     connection: { fetch: { register(route) {
@@ -129,6 +130,110 @@ test('save/list/read expose exact bodies, storage identity and stable content re
   assert.equal((await f.call('list', { scope: 'other' })).status, 400);
   assert.equal((await f.call('list', { projectRoot: resolve(f.projectRoot).split(/[\\/]/)[0] + '/' })).status, 400);
   assert.equal((await f.call('list', { projectRoot: 'relative' })).status, 400);
+});
+
+test('nested cwd uses the nearest Git root for CRUD, imports and agent tools', async (t) => {
+  for (const gitKind of ['directory', 'worktree-file']) await t.test(gitKind, async (t) => {
+    const f = await fixture(t), nested = join(f.projectRoot, 'packages', 'nested');
+    await mkdir(nested, { recursive: true });
+    if (gitKind === 'worktree-file') {
+      await rm(join(f.projectRoot, '.git'), { recursive: true });
+      await writeFile(join(f.projectRoot, '.git'), 'gitdir: /unused-fixture-target\n');
+    }
+    const oldRoot = join(nested, '.dsh', 'skills');
+    await mkdir(oldRoot, { recursive: true });
+    await writeFile(join(oldRoot, 'legacy.md'), skill('legacy'));
+    const saved = await f.call('save', { projectRoot: nested, mode: 'create', name: 'demo', kind: 'dir', body: skill() });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.value.root, f.root);
+    assert.equal(saved.value.path, join(f.root, 'demo', 'SKILL.md'));
+    const listed = await f.call('list', { projectRoot: nested });
+    assert.equal(listed.value.root, f.root);
+    assert.deepEqual(listed.value.skills.map(item => item.name), ['demo']);
+    const direct = await get(f);
+    const read = await f.tools.get('skills_manager_read').execute({ projectRoot: nested, name: 'demo', kind: 'dir' });
+    assert.equal(read.root, f.root);
+    assert.equal(read.revision, direct.revision);
+    const toggled = await f.call('setInvocation', { projectRoot: nested, ...identity(direct), modelInvocable: false });
+    assert.equal(toggled.status, 200);
+    assert.equal((await get(f)).revision, toggled.value.revision);
+    assert.equal((await f.call('remove', { projectRoot: nested, ...identity(toggled.value) })).status, 200);
+    const source = join(f.base, 'source');
+    await mkdir(source); await writeFile(join(source, 'SKILL.md'), skill());
+    const installed = await f.call('install', { projectRoot: nested, srcDir: source });
+    assert.equal(installed.status, 200);
+    assert.equal(installed.value.root, f.root);
+    assert.equal(await readFile(join(oldRoot, 'legacy.md'), 'utf8'), skill('legacy'));
+    await mkdir(join(nested, '.git'));
+    assert.equal((await f.call('list', { projectRoot: nested })).value.root, oldRoot, 'nearer Git root wins');
+  });
+});
+
+test('legacy nested location is reported and manual copies never move or overwrite originals', async (t) => {
+  const f = await fixture(t), cwd = join(f.projectRoot, 'package'), oldRoot = join(cwd, '.dsh', 'skills');
+  await mkdir(join(oldRoot, 'demo', 'references'), { recursive: true });
+  await writeFile(join(oldRoot, 'demo', 'SKILL.md'), skill());
+  await writeFile(join(oldRoot, 'demo', 'references', 'resource.txt'), 'original resource');
+  await writeFile(join(oldRoot, 'flat.md'), skill('flat'));
+  const payload = { projectRoot: cwd };
+  const listed = await f.call('list', payload);
+  assert.equal(listed.value.legacyRoot, oldRoot);
+  assert.deepEqual(listed.value.skills, []);
+  assert.equal((await f.call('install', { ...payload, srcDir: join(oldRoot, 'demo') })).status, 200);
+  assert.equal((await f.call('install', { ...payload, srcDir: join(oldRoot, 'flat.md') })).status, 200);
+  assert.equal(await readFile(join(oldRoot, 'demo', 'references', 'resource.txt'), 'utf8'), 'original resource');
+  assert.equal(await readFile(join(f.root, 'demo', 'references', 'resource.txt'), 'utf8'), 'original resource');
+  assert.equal(await readFile(join(oldRoot, 'flat.md'), 'utf8'), skill('flat'));
+  assert.equal((await f.call('install', { ...payload, srcDir: join(oldRoot, 'demo') })).status, 409);
+  assert.equal(await readFile(join(oldRoot, 'demo', 'SKILL.md'), 'utf8'), skill());
+  assert.equal((await f.call('list', { projectRoot: f.projectRoot })).value.legacyRoot, null);
+  assert.equal((await f.call('list', { scope: 'user' })).value.legacyRoot, null);
+});
+
+test('a changed git root rejects stale edit even when target content matches', async (t) => {
+  const f = await fixture(t), cwd = join(f.projectRoot, 'nested');
+  await mkdir(join(cwd, '.dsh', 'skills', 'demo'), { recursive: true });
+  const original = await create(f);
+  await writeFile(join(cwd, '.dsh', 'skills', 'demo', 'SKILL.md'), skill());
+  await mkdir(join(cwd, '.git'));
+  const base = { projectRoot: cwd, expectedRoot: f.root };
+  for (const [method, payload] of [
+    ['get', { name: 'demo', kind: 'dir' }],
+    ['save', { mode: 'update', ...identity(original), body: skill() + 'changed' }],
+    ['save', { mode: 'create', name: 'new', kind: 'dir', body: skill('new') }],
+    ['setInvocation', { ...identity(original), modelInvocable: false }],
+    ['remove', identity(original)],
+    ['install', { srcDir: join(cwd, '.dsh', 'skills', 'demo') }],
+    ['prepareRemote', { input: 'acme/skills' }],
+    ['prepareUpdate', { name: 'demo', kind: 'dir', expectedRevision: original.revision }],
+  ]) {
+    const result = await f.call(method, { ...base, ...payload });
+    assert.equal(result.status, 409, method);
+  }
+  assert.equal(await readFile(join(cwd, '.dsh', 'skills', 'demo', 'SKILL.md'), 'utf8'), skill());
+  assert.equal(await readFile(join(f.root, 'demo', 'SKILL.md'), 'utf8'), skill());
+});
+
+test('legacy history alone and linked old storage trigger a warning without following links', async (t) => {
+  const f = await fixture(t), cwd = join(f.projectRoot, 'nested'), oldRoot = join(cwd, '.dsh', 'skills');
+  await mkdir(join(cwd, '.dsh', 'skills-manager'), { recursive: true });
+  assert.equal((await f.call('list', { projectRoot: cwd })).value.legacyRoot, oldRoot);
+  const other = join(f.base, 'other');
+  await mkdir(other);
+  if (await linkOrSkip(t, other, oldRoot, true)) {
+    assert.equal((await f.call('list', { projectRoot: cwd })).value.legacyRoot, oldRoot);
+    assert.deepEqual(await readdir(other), []);
+  }
+});
+
+test('project cwd without Git keeps its own root and cancelled tools do no work', async (t) => {
+  const f = await fixture(t), nested = join(f.projectRoot, 'nested');
+  await mkdir(nested);
+  t.mock.method(fs, 'access', async () => { throw Object.assign(new Error('no Git fixture'), { code: 'ENOENT' }); });
+  assert.equal((await f.call('list', { projectRoot: nested })).value.root, join(nested, '.dsh', 'skills'));
+  const controller = new AbortController();
+  controller.abort(new Error('fixture cancelled'));
+  for (const tool of f.tools.values()) await assert.rejects(tool.execute({}, { signal: controller.signal }), /fixture cancelled/);
 });
 
 test('save is never an upsert; create conflicts across both formats and update requires CAS', async (t) => {
