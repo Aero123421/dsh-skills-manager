@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 — 2026-11-01
+
+- Align project skill storage and read tools with the nearest Git root used by DSH, including worktree files. The selected cwd and resolved root are shown separately.
+- Warn about old skills or history in the selected nested cwd; never move or overwrite them. Back up and copy individual skills manually, and retain old history/journals. Other subdirectories are not searched.
+- Bind GUI operations to the displayed root so a changed `.git` location is rejected with 409. Direct API callers should send `expectedRoot`; omitting it retains legacy behavior. Cross-process filesystem races remain possible.
+- Match native strict frontmatter delimiters, fix GitHub URL whitespace validation, isolate browser drafts by storage root, and register Japanese as a selectable language. Old rootless browser drafts are not restored; save them before upgrading.
+- Added root-change, migration-warning, manual-copy and native DSH service regression coverage. No new runtime dependencies.
+
 ## 0.5.0 — 2026-10-22
 
 - Added **Update from GitHub** in bundle details: explicit trust, commit comparison, changed-file list, bounded instruction diff, confirmation, and complete original-bundle backup.

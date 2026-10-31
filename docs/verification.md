@@ -1,6 +1,8 @@
-# Verification — 0.5.0
+# Verification history
 
-## Integration follow-up
+## 0.6.0 integration follow-up
+
+In an isolated Linux clone on Node 22.23.4, `npm ci --ignore-scripts` and `npm run check` passed 177 tests with one optional native test skipped. With the isolated official npm DSH `0.2.1-rc.5` via `DSH_NATIVE_MODULES`, the check passed all 180 tests with zero failures or skips. The final PR head also passed the GitHub Actions Ubuntu/macOS/Windows × Node 22/24 matrix; these CI jobs do not run the opt-in native smoke. No production DSH profile or existing browser was modified for this follow-up.
 
 The independent integration clone adds a warning when the selected nested cwd has an old `.dsh/skills` or `.dsh/skills-manager` location. The check does not scan other subdirectories, follow legacy links, move files or migrate provenance, journals or backups. Host tests cover directory and flat manual copies, resources, same-name refusal, original preservation, history-only detection and linked legacy roots; a client test covers the warning and context changes. A reproduced stale-edit case added a `.git` between loading and saving, with an identical same-name skill at both roots: the previous implementation updated the wrong root. The GUI now sends its displayed `expectedRoot` on reads and mutations, and the host rejects a changed root with 409; this is carried through GitHub and remote staging. Older direct API callers that omit this optional field do not receive that protection. Local-owner filesystem races are not eliminated. The native service smoke and offline tests are separate from browser, HTTP authentication and live-provider testing. Earlier records below describe only the versions and commits stated there.
 

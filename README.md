@@ -45,7 +45,7 @@ GitHubから直接入れられます（`github:` は `dsh plugin` が受け付�
 dsh plugin --profile web add github:Aero123421/dsh-skills-manager
 
 # バージョンを固定する（再現性が必要な場合に推奨）
-dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.5.0
+dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.6.0
 ```
 
 インストール後に再起動（または HMR リロード）すると、左サイドバーに **SKILLS** が増えます。
@@ -53,16 +53,18 @@ dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.5.0
 会話中のエージェント経由で入れる場合:
 
 > `plugin_manager` で `install_bundle` を呼び、target に
-> `github:Aero123421/dsh-skills-manager`（または `#v0.5.0` 付き）を指定してください。
+> `github:Aero123421/dsh-skills-manager`（または `#v0.6.0` 付き）を指定してください。
 
 ### Update / Uninstall
 
-**v0.2.0以前を使用している場合は、スキルをバックアップしてから最新版へ更新してください。** v0.3.0以降には、保存の原子性、同名スキルの識別、更新競合の検出の修正が含まれます。旧版ですでに破損・上書きされた内容を自動復元するものではありません。
+**更新前にスキル・旧履歴とDSHプロファイルをバックアップしてください。** 一部環境ではpnpm 12の依存解決失敗時に同一プロファイルの `node_modules` が空になり、他のプラグインも使えなくなる既知のリスクがあります。まず隔離プロファイルでインストールを検証してください。v0.6.0では旧形式の未保存ブラウザ下書きを自動復元しません。必要な下書きは更新前に保存してください。
+
+**v0.2.0以前を使用している場合は、特にスキルをバックアップしてから最新版へ更新してください。** v0.3.0以降には、保存の原子性、同名スキルの識別、更新競合の検出の修正が含まれます。旧版ですでに破損・上書きされた内容を自動復元するものではありません。
 
 ```sh
 # 更新: いったん外して入れ直し（DSHのgit/tarball更新フロー）
 dsh plugin --profile web remove dsh-skills-manager
-dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.5.0
+dsh plugin --profile web add github:Aero123421/dsh-skills-manager#v0.6.0
 
 # 削除
 dsh plugin --profile web remove dsh-skills-manager
@@ -202,7 +204,7 @@ description: What this skill does and when to use it.
 
 ## Verification
 
-`npm run check`: **163 tests** cover existing regressions plus verified provenance, complete-tree/origin CAS, preview/overwrite consent, bounded diffs, backups, transaction failure/recovery, committed-with-warning outcomes, stale-source clearing, legacy linking, HTTP compression and fresh branch resolution. Node tests are offline; real public GitHub commit changes and the existing DSH browser are verified separately. See [verification details](docs/verification.md).
+The v0.5.0 `npm run check` ran **163 tests** covering existing regressions plus verified provenance, complete-tree/origin CAS, preview/overwrite consent, bounded diffs, backups, transaction failure/recovery, committed-with-warning outcomes, stale-source clearing, legacy linking, HTTP compression and fresh branch resolution. Node tests are offline; real public GitHub commit changes and the existing DSH browser are verified separately. See [verification details](docs/verification.md).
 
 [![Check](https://github.com/Aero123421/dsh-skills-manager/actions/workflows/check.yml/badge.svg)](https://github.com/Aero123421/dsh-skills-manager/actions/workflows/check.yml)
 
@@ -211,7 +213,7 @@ description: What this skill does and when to use it.
 `npm ci --ignore-scripts` → `npm run check` でHostとClientの回帰テストを実行できます。ビルドは不要です。
 `plugin_manager` の `install_bundle`（target = このディレクトリの絶対パス）で開発用 profile に入れて動作確認できます。
 
-2026-10-29の互換性確認では、公式npm配布のDSH `0.2.1-rc.2`（`latest`）、`0.2.1-rc.4`（`next`）、`0.2.2-alpha.2`（`alpha`）の実サービスを使い、保存→native discovery、ツール出力、キャンセル、アンロード後の登録解除と再ロードを確認しました。ブラウザ・認証・モデル呼び出しの試験ではありません。通常のオフライン回帰は168件成功です。手元に導入済みの公式DSHに対して `DSH_NATIVE_MODULES=/absolute/path/to/node_modules npm run check` を実行すると、追加のnative smokeも実行できます（未指定時はその1件をスキップ）。対象SHAと制限は [verification details](docs/verification.md) を参照してください。
+2026-10-29の互換性確認では、公式npm配布のDSH `0.2.1-rc.2`（`latest`）、`0.2.1-rc.4`（`next`）、`0.2.2-alpha.2`（`alpha`）の実サービスを使い、保存→native discovery、ツール出力、キャンセル、アンロード後の登録解除と再ロードを確認しました。ブラウザ・認証・モデル呼び出しの試験ではありません。当時のオフライン回帰は168件成功でした。手元に導入済みの公式DSHに対して `DSH_NATIVE_MODULES=/absolute/path/to/node_modules npm run check` を実行すると、追加のnative smokeも実行できます（未指定時はその1件をスキップ）。対象SHAと制限は [verification details](docs/verification.md) を参照してください。
 
 ## License
 
