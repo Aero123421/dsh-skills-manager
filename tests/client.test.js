@@ -211,6 +211,19 @@ test('project list shows resolved storage before create while retaining the ente
   assert.equal(app.all(node => node.type === 'textarea').length, 1);
 });
 
+test('legacy warning shows old location and is cleared on context change', async () => {
+  const cwd = '/repo/packages/a', root = '/repo/.dsh/skills', legacyRoot = cwd + '/.dsh/skills';
+  const app = harness({ storage: new Map([['dsh-skills-manager:projectRoot', cwd]]) });
+  await app.reply('list', list());
+  app.click(app.button('project'));
+  await app.reply('list', { ...list([], root), legacyRoot });
+  assert.ok(app.all(node => node.type === 'div' && node.props.children.includes(legacyRoot)).length);
+  assert.ok(app.all(node => node.type === 'p' && node.props.children.includes('legacyWarning')).length);
+  app.click(app.button('user'));
+  await app.reply('list', list());
+  assert.equal(app.all(node => node.type === 'p' && node.props.children.includes('legacyWarning')).length, 0);
+});
+
 test('failed refresh removes previous cards and root and gates stale row handlers', async () => {
   const app = harness();
   await app.reply('list', list([skill()], '/old/root'));

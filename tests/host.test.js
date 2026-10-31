@@ -169,6 +169,39 @@ test('nested cwd uses the nearest Git root for CRUD, imports and agent tools', a
   });
 });
 
+test('legacy nested location is reported and manual copies never move or overwrite originals', async (t) => {
+  const f = await fixture(t), cwd = join(f.projectRoot, 'package'), oldRoot = join(cwd, '.dsh', 'skills');
+  await mkdir(join(oldRoot, 'demo', 'references'), { recursive: true });
+  await writeFile(join(oldRoot, 'demo', 'SKILL.md'), skill());
+  await writeFile(join(oldRoot, 'demo', 'references', 'resource.txt'), 'original resource');
+  await writeFile(join(oldRoot, 'flat.md'), skill('flat'));
+  const payload = { projectRoot: cwd };
+  const listed = await f.call('list', payload);
+  assert.equal(listed.value.legacyRoot, oldRoot);
+  assert.deepEqual(listed.value.skills, []);
+  assert.equal((await f.call('install', { ...payload, srcDir: join(oldRoot, 'demo') })).status, 200);
+  assert.equal((await f.call('install', { ...payload, srcDir: join(oldRoot, 'flat.md') })).status, 200);
+  assert.equal(await readFile(join(oldRoot, 'demo', 'references', 'resource.txt'), 'utf8'), 'original resource');
+  assert.equal(await readFile(join(f.root, 'demo', 'references', 'resource.txt'), 'utf8'), 'original resource');
+  assert.equal(await readFile(join(oldRoot, 'flat.md'), 'utf8'), skill('flat'));
+  assert.equal((await f.call('install', { ...payload, srcDir: join(oldRoot, 'demo') })).status, 409);
+  assert.equal(await readFile(join(oldRoot, 'demo', 'SKILL.md'), 'utf8'), skill());
+  assert.equal((await f.call('list', { projectRoot: f.projectRoot })).value.legacyRoot, null);
+  assert.equal((await f.call('list', { scope: 'user' })).value.legacyRoot, null);
+});
+
+test('legacy history alone and linked old storage trigger a warning without following links', async (t) => {
+  const f = await fixture(t), cwd = join(f.projectRoot, 'nested'), oldRoot = join(cwd, '.dsh', 'skills');
+  await mkdir(join(cwd, '.dsh', 'skills-manager'), { recursive: true });
+  assert.equal((await f.call('list', { projectRoot: cwd })).value.legacyRoot, oldRoot);
+  const other = join(f.base, 'other');
+  await mkdir(other);
+  if (await linkOrSkip(t, other, oldRoot, true)) {
+    assert.equal((await f.call('list', { projectRoot: cwd })).value.legacyRoot, oldRoot);
+    assert.deepEqual(await readdir(other), []);
+  }
+});
+
 test('project cwd without Git keeps its own root and cancelled tools do no work', async (t) => {
   const f = await fixture(t), nested = join(f.projectRoot, 'nested');
   await mkdir(nested);

@@ -21,12 +21,16 @@ window.__ModuleLoader__.load({
       }, h('path', { d: paths[name] }));
     }
     const en = {
+      legacyWarning:'An older skills location may contain files not shown here. Nothing was moved. Back up the old location, then use Install skill → Local folder to copy each trusted bundle folder or .md file into the location above. Existing names are not overwritten. Review conflicts and invalid or linked files manually. GitHub source tracking, transaction journals and backups under the sibling skills-manager directory are not copied; retain them. Resolve any pending recovery with the previous version before copying, and register the source again if needed. Only the entered directory is checked, not other subdirectories.',
+      legacyLocation:'Previous location to inspect',
       updateUnavailable:'GitHub update unavailable',
       githubUpdate:'Update from GitHub',updateSource:'GitHub source',updateSourceHint:'Enter owner/repo or an https://github.com repository or /tree/ URL only. Shell commands are not accepted.',updateInvalidSource:'Enter owner/repo or an HTTPS GitHub repository/tree URL, not a command.',updateTrust:'I trust this GitHub source and allow downloads and the pinned official skills 1.7.4 CLI in the same isolated temporary process used for installation. No skill scripts are executed.',updateUntracked:'This skill has no recorded GitHub source (including older v0.4 installs). Enter and confirm its source manually; no source is guessed.',updateDirty:'Local edits were detected in this bundle. Review the preview before deciding whether to replace them.',updateOverwrite:'Replace local changes after backing up',updateCheck:'Check for updates',updateChecking:'Checking for updates…',updateApply:'Apply update',updateApplying:'Applying update…',updateUpToDate:'No upstream update is available. Nothing will be overwritten; local edits are preserved.',updateLink:'Only source tracking/metadata will be updated. Skill instructions and bundled files will not change.',updateAvailable:'Review the file changes before applying this update.',updateOldCommit:'Current commit',updateNewCommit:'Latest commit',updateUnknownCommit:'Not tracked',updateAdded:'Added',updateModified:'Modified',updateRemoved:'Removed',updateTotal:'Total',updateFiles:'Changed files',updateDiff:'Diff',updateFilesTruncated:'The changed-file list is truncated.',updateDiffTruncated:'The diff is truncated.',updateDone:'GitHub update applied.',updateTrackingDone:'GitHub source tracking updated. Skill files were not changed.',updateBackup:'Backup of the entire previous bundle',updateMissingResult:'The server returned an invalid update result. Check again before applying.',updateExpired:'This update preview has expired. Check again.',updateDestination:'Captured destination',
       localFolder:'Local folder',remoteMode:'npx skills',installMode:'Install source',remoteSource:'Command or GitHub repository',remoteHint:'Paste npx skills add owner/repo --skill name, owner/repo, or a GitHub URL. Initial support: public GitHub repositories and add only. No arbitrary shell execution. The current project/user destination stays fixed; a conflicting -g flag returns an error.',remoteTrust:'I trust this source and allow an external download and the pinned official skills 1.7.4 CLI to run in an isolated temporary directory. No skill scripts are executed.',fetching:'Fetching skills…',fetchSkills:'Preview skills',remoteResolvedSource:'Source',remoteCommit:'Commit',remoteSelect:'Select skills to install',remoteSelectHint:'Nothing is selected by default. Choose one or more skills.',remoteResults:'Installation results',remoteComplete:'All selected skills installed.',remoteIncomplete:'Some skills were not installed. Review each result below.',remoteInstalled:'Installed',remoteFailed:'Failed',remoteMissingResult:'The server did not return a result for this skill.',remoteExpired:'This preview has expired. Fetch a new preview.',
       panel:'SKILLS',title:'Skills',intro:'Reusable instructions for your agents.',project:'Project',user:'User',install:'Install skill',create:'Create skill',refresh:'Refresh',search:'Search skills…',projectPath:'Project directory',browse:'Browse',apply:'Open project',installed:'Installed skills',emptyTitle:'Your skills, in one place',empty:'Install a local skill or create reusable instructions for your agents.',noResults:'No matching skills',disabled:'Disabled',invalid:'Invalid',back:'All skills',preview:'Instructions',edit:'Edit',save:'Save changes',cancel:'Cancel',delete:'Delete skill',model:'Agent access',modelHint:'Allow agents to discover and load this skill.',human:'Slash command',humanHint:'Make this skill available through /name.',location:'Location',details:'Availability',body:'SKILL.md',newTitle:'Create skill',installTitle:'Install a local skill',source:'Source path',sourceHint:'Absolute path on the DSH host to a skill folder or Markdown file.',destination:'Install to',trust:'Only install skills you trust. Instructions and bundled scripts may influence agent actions.',installing:'Installing…',saving:'Saving…',loading:'Loading…',done:'Saved successfully.',installedDone:'Skill installed.',deleteTitle:'Delete this skill?',deleteHint:'The skill and its bundled files will be permanently removed. This cannot be undone.',draft:'Unsaved changes',discard:'Discard unsaved changes?',validation:'Check format',valid:'Skill format is valid.',pickerUnavailable:'Directory picker unavailable. Enter the host directory path.',selectProject:'Choose a project directory to manage its skills.',userHint:'Available across your projects.',renameError:'To use a different skill name, create a new skill.',close:'Close',bundle:'Bundle',markdown:'Markdown',draftRestored:'Unsaved draft restored.',draftConflict:'An older draft was restored. Saving may conflict with newer changes; cancel to use the current version.',
     };
     const ja = {
+      legacyWarning:'旧保存先に、この一覧に表示されないファイルがある可能性があります。自動移動はしていません。旧保存先をバックアップし、「スキルをインストール」→「ローカルフォルダ」で信頼できる各スキルのフォルダまたは.mdファイルを上記の保存先へコピーしてください。同名のものは上書きされません。競合・形式エラー・リンクは手動で確認してください。隣接するskills-manager内のGitHub取得元情報・処理途中の記録・バックアップはコピーされません。旧データを保管し、復旧待ちの処理はコピー前に旧版で復旧してください。必要に応じて取得元を再登録してください。入力したディレクトリだけを確認し、他のサブディレクトリは検索しません。',
+      legacyLocation:'確認が必要な旧保存先',
       updateUnavailable:'GitHubからの更新を利用できません',
       githubUpdate:'GitHubから更新',updateSource:'GitHubソース',updateSourceHint:'owner/repo または https://github.com のリポジトリ／tree URLのみ入力できます。シェルコマンドは使用できません。',updateInvalidSource:'コマンドではなく owner/repo または HTTPSのGitHubリポジトリ／tree URLを入力してください。',updateTrust:'このGitHubソースを信頼し、ダウンロードと、インストール時と同じ隔離された一時プロセスでの公式CLI skills 1.7.4（固定バージョン）の実行を許可します。スキルのスクリプトは実行しません。',updateUntracked:'このスキルのGitHubソースは未記録です（従来のv0.4インストールを含みます）。ソースを推測せず、手動で入力して確認してください。',updateDirty:'このバンドルにローカル変更があります。プレビューを確認してから置き換えるか判断してください。',updateOverwrite:'ローカル変更をバックアップ後に置き換える',updateCheck:'更新を確認',updateChecking:'更新を確認中…',updateApply:'更新を適用',updateApplying:'更新を適用中…',updateUpToDate:'上流の更新はありません。上書きせず、ローカル変更はそのまま保持します。',updateLink:'ソースの追跡情報／メタデータのみ更新します。スキルの手順や同梱ファイルは変更しません。',updateAvailable:'適用前にファイルの変更内容を確認してください。',updateOldCommit:'現在のコミット',updateNewCommit:'最新のコミット',updateUnknownCommit:'未記録',updateAdded:'追加',updateModified:'変更',updateRemoved:'削除',updateTotal:'合計',updateFiles:'変更ファイル',updateDiff:'差分',updateFilesTruncated:'変更ファイル一覧は一部省略されています。',updateDiffTruncated:'差分は一部省略されています。',updateDone:'GitHubからの更新を適用しました。',updateTrackingDone:'GitHubソースの追跡情報を更新しました。スキルのファイルは変更していません。',updateBackup:'変更前のバンドル全体のバックアップ',updateMissingResult:'更新結果が不正です。再確認してから適用してください。',updateExpired:'更新プレビューの有効期限が切れました。再確認してください。',updateDestination:'確認時の保存先',
       localFolder:'ローカルフォルダ',remoteMode:'npx skills',installMode:'インストール元',remoteSource:'コマンドまたはGitHubリポジトリ',remoteHint:'npx skills add owner/repo --skill name、owner/repo、またはGitHub URLを貼り付けてください。初期対応は公開GitHubリポジトリのaddのみです。任意のシェルコマンドは実行しません。現在のプロジェクト／ユーザーの保存先は固定され、競合する-g指定はエラーになります。',remoteTrust:'このソースを信頼し、外部ダウンロードと、隔離された一時ディレクトリでの公式CLI skills 1.7.4（固定バージョン）の実行を許可します。スキルのスクリプトは実行しません。',fetching:'スキルを取得中…',fetchSkills:'スキルをプレビュー',remoteResolvedSource:'ソース',remoteCommit:'コミット',remoteSelect:'インストールするスキルを選択',remoteSelectHint:'初期状態では未選択です。1つ以上のスキルを選んでください。',remoteResults:'インストール結果',remoteComplete:'選択したすべてのスキルをインストールしました。',remoteIncomplete:'インストールできなかったスキルがあります。各結果を確認してください。',remoteInstalled:'インストール済み',remoteFailed:'失敗',remoteMissingResult:'このスキルの結果がサーバーから返されませんでした。',remoteExpired:'プレビューの有効期限が切れました。再取得してください。',
@@ -83,6 +87,7 @@ window.__ModuleLoader__.load({
       const [projectDraft, setProjectDraft] = useState(project);
       const [skills, setSkills] = useState([]);
       const [root, setRoot] = useState('');
+      const [legacyRoot, setLegacyRoot] = useState(null);
       const [listKey, setListKey] = useState(null);
       const [query, setQuery] = useState('');
       const [loading, setLoading] = useState(false);
@@ -379,6 +384,7 @@ window.__ModuleLoader__.load({
         // A failed refresh must never leave old cards or a previous root actionable.
         setSkills([]);
         setRoot('');
+        setLegacyRoot(null);
         setListKey(null);
         view.current.ready = false;
         setLoading(true);
@@ -388,6 +394,7 @@ window.__ModuleLoader__.load({
           if (!active(request, 'list')) return;
           setSkills(value.skills);
           setRoot(value.root);
+          setLegacyRoot(typeof value.legacyRoot === 'string' ? value.legacyRoot : null);
           setListKey(request.contextKey);
           view.current.ready = true;
         } catch (error) {
@@ -441,6 +448,7 @@ window.__ModuleLoader__.load({
           detail: null, editor: false, dirty: false, ready: false };
         setSkills([]);
         setRoot('');
+        setLegacyRoot(null);
         setListKey(null);
         setDetail(null);
         setEditor(false);
@@ -709,6 +717,8 @@ window.__ModuleLoader__.load({
             h('code', { className: 'dsm-path', title: root }, root || t('userHint'))),
         scope === 'project' && root && h('div', { className: 'dsm-context', 'aria-label': t('location') },
           h('span', null, t('location')), h('code', { className: 'dsm-path', title: root }, root)),
+        ready && scope === 'project' && legacyRoot && h('div', { className: 'dsm-notice', role: 'status' },
+          h('strong', null, t('legacyLocation')), h('div', null, legacyRoot), h('p', null, t('legacyWarning'))),
         message,
         h('div', { className: 'dsm-section-head' },
           h('h2', null, t('installed'), h('span', { className: 'dsm-count' }, skills.length)),

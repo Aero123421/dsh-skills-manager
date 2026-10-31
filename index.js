@@ -389,7 +389,24 @@ export function apply(ctx, input = {}) {
     async list(payload) {
       const { scope, root, canonical } = await rootFor(payload);
       for (const skillName of await history.pendingNames(root)) await serialized(canonical, skillName, async () => history.recover(root, skillName, await canRecover(payload)));
-      return { skills: await listSkills(root), root, scope };
+      // The old manager treated the entered cwd itself as the project root.
+      // Check only that exact location: never scan arbitrary descendants or move data.
+      let legacyRoot = null;
+      if (scope === 'project') {
+        const oldRoot = join(resolve(payload.projectRoot.trim()), '.dsh', 'skills');
+        if (oldRoot !== root) {
+          try {
+            const oldHistory = join(dirname(oldRoot), 'skills-manager');
+            await noSymlinks(oldRoot);
+            await noSymlinks(oldHistory);
+            if (await info(oldRoot) || await info(oldHistory)) legacyRoot = oldRoot;
+          } catch {
+            // A linked/inaccessible old location must not be silently reported absent.
+            legacyRoot = oldRoot;
+          }
+        }
+      }
+      return { skills: await listSkills(root), root, scope, legacyRoot };
     },
     async get(payload) {
       const { scope, root, canonical } = await rootFor(payload);
